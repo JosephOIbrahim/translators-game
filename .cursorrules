@@ -1,0 +1,186 @@
+# The Translators — Cursor Rules
+
+## Project Identity
+
+This is **The Translators**, a gamified cognitive profiling tool that generates personalized LLM communication preferences through gameplay.
+
+**The Law (Immutable)**:
+- Each game stage = different mechanic
+- Profile emerges from play, not questionnaires  
+- LLM uses profile for real-life help
+- The 4th dimension: game extends into life
+
+## Critical Files
+
+### `docs/GAME_SPEC.md` — AUTHORITATIVE SPECIFICATION
+**READ THIS FIRST before any gameplay changes.**
+
+This document defines:
+- Every mechanic's exact behavior
+- Every verbal cue and its trigger
+- Every measurement and how it's calculated
+- The exact profile output format
+
+**RULE: No gameplay changes without first proposing a spec amendment.**
+
+### `src/game/config/` — All Magic Numbers Live Here
+Never hardcode values in component files. All:
+- Colors → `palette.js`
+- Timing → `timing.js`  
+- Dialogue text → `dialogue.js`
+- Layer definitions → `layers.js`
+- Physics constants → `physics.js`
+
+## Architecture
+
+```
+src/
+├── main.js                    # Entry point, initializes game
+├── game/
+│   ├── Game.js               # Main controller, state machine
+│   ├── states/               # One file per game state
+│   │   ├── TitleState.js
+│   │   ├── LayerIntroState.js
+│   │   ├── ExploreState.js   # Layer 1
+│   │   ├── ArrangeState.js   # Layer 2
+│   │   ├── SignalState.js    # Layer 3
+│   │   └── ProfileState.js
+│   ├── entities/             # Game objects
+│   │   ├── Octopus.js
+│   │   ├── Orb.js
+│   │   ├── Element.js
+│   │   └── Particle.js
+│   ├── systems/              # Cross-cutting concerns
+│   │   ├── Renderer.js
+│   │   ├── Input.js
+│   │   ├── DialogueSystem.js
+│   │   ├── BehaviorTracker.js
+│   │   └── ProfileGenerator.js
+│   └── config/               # ALL configuration here
+│       ├── palette.js
+│       ├── layers.js
+│       ├── dialogue.js
+│       ├── physics.js
+│       └── timing.js
+└── styles/
+    └── main.css              # UI styles only (not canvas)
+```
+
+## Coding Standards
+
+### State Pattern
+Each game state implements:
+```javascript
+class SomeState {
+  enter(game) {}      // Called when entering state
+  exit(game) {}       // Called when leaving state
+  update(game, dt) {} // Called every frame
+  render(game, ctx) {} // Called every frame after update
+  onPointerDown(game, x, y) {}
+  onPointerMove(game, x, y) {}
+  onPointerUp(game) {}
+}
+```
+
+### Config-Driven
+```javascript
+// BAD - hardcoded values
+ctx.fillStyle = '#5cffdb';
+octo.vx *= 0.92;
+
+// GOOD - config-driven
+import { PALETTE } from '../config/palette.js';
+import { PHYSICS } from '../config/physics.js';
+ctx.fillStyle = PALETTE.glowCyan;
+octo.vx *= PHYSICS.octopus.drag;
+```
+
+### Behavior Tracking
+All measurements go through BehaviorTracker:
+```javascript
+// In ExploreState
+game.behavior.trackPath(dx, dy);
+game.behavior.collectOrb(orbIndex);
+
+// Never access behavior.pathLength directly from states
+```
+
+### Dialogue
+All dialogue text lives in `config/dialogue.js`:
+```javascript
+// BAD
+game.dialogue.show("You found one.");
+
+// GOOD
+import { DIALOGUE } from '../config/dialogue.js';
+game.dialogue.show(DIALOGUE.explore.firstOrb);
+```
+
+## What You Can Change Freely
+
+- Bug fixes
+- Performance optimizations
+- Code organization/refactoring
+- Comments and documentation
+- Test coverage
+- Build configuration
+
+## What Requires Discussion
+
+- Any new game mechanic
+- Changes to what gets measured
+- Changes to profile generation logic
+- New verbal cues or dialogue
+- Visual style changes beyond bug fixes
+
+## What You Cannot Change
+
+- The three-layer structure
+- The core mechanics (explore/arrange/signal)
+- The profile output format
+- The Law (stated above)
+
+## Common Tasks
+
+### Adding a new verbal cue
+1. Propose the cue and its trigger
+2. Add to `docs/GAME_SPEC.md` after approval
+3. Add text to `src/game/config/dialogue.js`
+4. Add trigger logic in appropriate state file
+
+### Fixing a visual bug
+1. Check if it's a config issue first (`palette.js`, `timing.js`)
+2. If in rendering code, fix in the appropriate entity or state
+3. Verify against GAME_SPEC.md visual specification
+
+### Adjusting game feel
+1. All physics constants are in `config/physics.js`
+2. All timing constants are in `config/timing.js`
+3. Change there, not in component files
+
+## Testing
+
+Run individual layers:
+```bash
+npm run dev -- --layer=explore
+npm run dev -- --layer=arrange  
+npm run dev -- --layer=signal
+```
+
+Skip to profile (with mock data):
+```bash
+npm run dev -- --skip-to-profile
+```
+
+## Remember
+
+**The goal is predictable builds.** 
+
+Just as the Thinking Machines article describes defeating inference nondeterminism through explicit specification of reduction order, we defeat build nondeterminism through:
+
+1. Config files as single source of truth
+2. GAME_SPEC.md as authoritative gameplay reference
+3. Clear boundaries on what can change
+4. State pattern for predictable game flow
+
+When in doubt, check the spec. When the spec is unclear, ask before implementing.

@@ -1,0 +1,598 @@
+/**
+ * Main Styles — The Translators
+ * 
+ * UI-only styles. Canvas rendering is handled by JavaScript.
+ */
+
+/* === Reset & Base === */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* The Translators v2 — Warm Parchment Palette
+   * Cozy watercolor aesthetic matching sprite sheet
+   * Darker warm backgrounds + punchy earthy accents */
+
+  /* Backgrounds — aged parchment (darker, warmer) */
+  --bg-primary: #ddd4c4;      /* main canvas - warm parchment */
+  --bg-secondary: #d0c7b6;    /* cards, containers - aged paper */
+  --bg-card: #ebe6db;         /* elevated cards - cream */
+  --bg-overlay: rgba(221, 212, 196, 0.97);
+
+  /* Accent colors — SATURATED earthy (the pop) */
+  --sage: #6b9b5d;            /* primary — forest green */
+  --coral: #d97a5d;           /* secondary — warm terracotta */
+  --gold: #c9a04a;            /* tertiary — antique gold */
+  --teal: #5a9a8a;            /* info — sea green */
+  --plum: #8b6a8c;            /* special — soft plum */
+
+  /* Creature colors (from sprite sheet) */
+  --creature-body: #c4a882;   /* warm tan base */
+  --creature-light: #e8d5b8;  /* highlight */
+  --creature-dark: #8a7560;   /* shadow/outline */
+  --creature-accent: #d97a5d; /* coral accents */
+
+  /* Legacy aliases */
+  --accent-sage: var(--sage);
+  --accent-coral: var(--coral);
+  --accent-gold: var(--gold);
+  --accent-teal: var(--teal);
+  --glow-cyan: var(--sage);
+  --glow-teal: var(--teal);
+  --glow-purple: var(--coral);
+  --glow-pink: var(--coral);
+  --glow-gold: var(--gold);
+
+  /* Text — dark brown for warmth */
+  --text: #4a4035;            /* primary text - warm brown */
+  --text-muted: #7a6f60;      /* secondary text */
+  --text-dim: var(--text-muted);
+
+  /* UI elements */
+  --border: #b8ad9c;          /* warm borders */
+  --shadow: rgba(74, 64, 53, 0.12);
+  --shadow-hover: rgba(74, 64, 53, 0.2);
+  --pixel-outline: #4a4035;   /* sprite outlines */
+
+  /* Typography */
+  --font-pixel: 'VT323', monospace;
+  --font-body: 'Space Grotesk', sans-serif;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-primary);
+  font-family: var(--font-body);
+  color: var(--text);
+  touch-action: none;
+  user-select: none;
+}
+
+/* Optional: Subtle paper/canvas texture for cozy feel
+ * Uncomment to enable */
+/*
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%' height='100%' filter='url(%23noise)'/%3E%3C/svg%3E");
+  opacity: 0.03;
+  pointer-events: none;
+  z-index: 9999;
+  mix-blend-mode: overlay;
+}
+*/
+
+#game {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#ui {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#ui > * {
+  pointer-events: auto;
+}
+
+/* === Overlays === */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg-overlay);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+  z-index: 100;
+}
+
+.overlay.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* === Typography === */
+.title {
+  font-family: var(--font-pixel);
+  font-size: 2.8rem;
+  letter-spacing: 0.1em;
+  color: var(--text);
+  text-shadow: none;
+  text-transform: uppercase;
+}
+
+.subtitle {
+  font-family: var(--font-pixel);
+  font-size: 1.1rem;
+  letter-spacing: 0.25em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-top: 8px;
+}
+
+.desc {
+  font-size: 1rem;
+  font-weight: 300;
+  color: var(--text);
+  text-align: center;
+  max-width: 340px;
+  line-height: 1.7;
+  margin: 28px 0;
+}
+
+.hint {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  margin-top: 16px;
+}
+
+/* === Buttons === */
+.btn {
+  background: var(--bg-card);
+  border: 2px solid var(--sage);
+  color: var(--sage);
+  font-family: var(--font-pixel);
+  font-size: 1.4rem;
+  letter-spacing: 0.15em;
+  padding: 14px 36px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px var(--shadow);
+  border-radius: 4px;
+}
+
+.btn:hover {
+  background: var(--sage);
+  color: white;
+  box-shadow: 0 4px 12px var(--shadow-hover);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn.secondary {
+  border-color: var(--text-dim);
+  color: var(--text-dim);
+  font-size: 1.1rem;
+  padding: 10px 24px;
+}
+
+.btn.small {
+  font-size: 0.9rem;
+  padding: 8px 16px;
+  border-color: var(--coral);
+  color: var(--coral);
+}
+
+.btn.small:hover {
+  background: var(--coral);
+  color: white;
+}
+
+/* === Dialogue Box === */
+.dialogue-box {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  border-left: 4px solid var(--sage);
+  border-radius: 8px;
+  padding: 16px 24px;
+  max-width: 380px;
+  width: calc(100% - 48px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  z-index: 80;
+  box-shadow: 0 4px 20px var(--shadow);
+}
+
+.dialogue-box.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dialogue-speaker {
+  font-family: var(--font-pixel);
+  font-size: 0.95rem;
+  color: var(--sage);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 8px;
+}
+
+.dialogue-text {
+  font-size: 1rem;
+  font-weight: 300;
+  color: var(--text);
+  line-height: 1.6;
+}
+
+.dialogue-continue {
+  font-family: var(--font-pixel);
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  margin-top: 12px;
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.4; }
+}
+
+/* === HUD === */
+.hud {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.hud-label {
+  font-family: var(--font-pixel);
+  font-size: 1.1rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.hud-label.visible { opacity: 1; }
+
+.orb-counter {
+  font-family: var(--font-pixel);
+  font-size: 1.2rem;
+  color: var(--glow-purple);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.orb-counter.visible { opacity: 1; }
+
+/* === Instruction === */
+.instruction {
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-pixel);
+  font-size: 1rem;
+  color: var(--text-dim);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.instruction.visible { opacity: 1; }
+
+/* === Continue Button === */
+.continue-btn {
+  position: absolute;
+  bottom: 24px;
+  right: 24px;
+  background: var(--sage);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-family: var(--font-pixel);
+  font-size: 1.1rem;
+  padding: 12px 24px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.3s ease;
+  z-index: 60;
+  box-shadow: 0 2px 8px var(--shadow);
+}
+
+.continue-btn:hover {
+  background: #5a8a4e;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px var(--shadow-hover);
+}
+
+.continue-btn.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* === Signal Options === */
+.signal-options {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  z-index: 60;
+}
+
+.signal-options.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.signal-btn {
+  width: 64px;
+  height: 64px;
+  border: 3px solid var(--text-dim);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.signal-btn:hover {
+  transform: scale(1.1);
+  border-color: var(--text);
+}
+
+.signal-btn span {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-pixel);
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* === Profile Card === */
+.profile-card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 380px;
+  width: 100%;
+  margin-top: 20px;
+  box-shadow: 0 4px 20px var(--shadow);
+}
+
+.profile-section {
+  margin-bottom: 20px;
+}
+
+.profile-section:last-child { margin-bottom: 0; }
+
+.section-title {
+  font-family: var(--font-pixel);
+  font-size: 1rem;
+  color: var(--sage);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.trait {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.trait-name { color: var(--text-muted); }
+.trait-value { color: var(--sage); font-weight: 500; }
+
+.insight {
+  font-size: 0.9rem;
+  font-weight: 300;
+  color: var(--text);
+  line-height: 1.5;
+  margin-bottom: 10px;
+  padding-left: 12px;
+  border-left: 3px solid var(--coral);
+}
+
+.copy-msg {
+  font-family: var(--font-pixel);
+  font-size: 1rem;
+  color: var(--sage);
+  text-align: center;
+  margin-top: 12px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.copy-msg.visible { opacity: 1; }
+
+/* === Sources Section === */
+.sources-section {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.sources-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.source-item {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-style: italic;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+
+/* === Wolfram Lens Visualization (legacy) === */
+.lens-section {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+.lens-description {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+  font-style: italic;
+}
+
+.lens-params {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.lens-param {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.lens-expr {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.9rem;
+  background: var(--bg-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--teal);
+}
+
+.lens-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  flex: 1;
+  min-width: 100px;
+}
+
+.lens-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--bg-secondary);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.lens-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--sage), var(--teal));
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.lens-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.lens-confidence {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.confidence-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.confidence-value {
+  font-family: var(--font-pixel);
+  font-size: 1rem;
+  color: var(--gold);
+}
+
+.lens-explore-link {
+  display: block;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--teal);
+  text-decoration: none;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  transition: background 0.2s ease;
+}
+
+.lens-explore-link:hover {
+  background: var(--bg-hover);
+}
+
+/* === Responsive === */
+@media (max-width: 480px) {
+  .title {
+    font-size: 2rem;
+  }
+  
+  .btn {
+    font-size: 1.2rem;
+    padding: 12px 28px;
+  }
+  
+  .profile-card {
+    padding: 16px;
+  }
+  
+  .signal-btn {
+    width: 56px;
+    height: 56px;
+  }
+}

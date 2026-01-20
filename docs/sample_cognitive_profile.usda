@@ -1,0 +1,70 @@
+#usda 1.0
+(
+    defaultPrim = "CognitiveProfile"
+    metersPerUnit = 1
+    customLayerData = {
+        string source = "The Translators"
+        string version = "1.0"
+        string generated = "2026-01-15T22:30:00.000Z"
+        string purpose = "AI Communication Preferences"
+    }
+)
+
+def "CognitiveProfile" (
+    kind = "component"
+    doc = "Cognitive profile derived from behavioral observation, not self-report."
+)
+{
+    # === Core Traits ===
+    # These map to USD composition priority (LIVRPS):
+    # - Can be overridden by stronger layers (session-specific)
+    # - Can be referenced by other USD files
+    # - Can be varianted (work mode vs personal mode)
+
+    custom string exploration = "Expansive"
+    custom float exploration:score = 0.623
+
+    custom string thoroughness = "Complete"
+    custom float thoroughness:score = 0.875
+
+    custom string organization = "Structured"
+    custom string organization:style = "linear"
+
+    custom string communication = "Reflective"
+    custom string communication:style = "reflective"
+
+    custom string pace = "Quick"
+    custom float pace:avgResponseMs = 1842
+
+    # === Derived Insights ===
+    def "Insights" (
+        doc = "Behavioral patterns observed during profiling session"
+    )
+    {
+        custom string insight_0 = "Explores fully before deciding — values completeness"
+        custom string insight_1 = "Builds connection through reflection — match their style"
+        custom string insight_2 = "Quick processor — get to the point"
+    }
+
+    # === Communication Instructions ===
+    def "Instructions" (
+        doc = "How AI systems should communicate with this user"
+    )
+    {
+        custom string instruction_0 = "Feel free to explore tangents and connections"
+        custom string instruction_1 = "Present information in clear, ordered steps"
+        custom string instruction_2 = "Mirror my communication style"
+        custom string instruction_3 = "Get to the point efficiently"
+    }
+
+    # === Metadata ===
+    def "Meta" (
+        doc = "Profiling session metadata"
+    )
+    {
+        custom string source = "The Translators"
+        custom string method = "behavioral_observation"
+        custom string timestamp = "2026-01-15T22:30:00.000Z"
+        custom int sessionDurationSec = 180
+    }
+}
