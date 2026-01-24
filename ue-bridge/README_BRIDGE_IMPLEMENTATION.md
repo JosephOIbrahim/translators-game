@@ -1,6 +1,8 @@
 # Claude Code → Unreal Engine 5.7 Bridge Implementation
 
-**Status**: Implementation Complete (Iteration 1)
+> **Note:** This document describes the v1.0.0 JSON-based protocol. For the current USD-native v2.0.0 implementation with ThinkingMachines compliance, see **[README.md](./README.md)**.
+
+**Status**: Superseded by v2.0.0
 **Date**: January 2026
 
 ---
