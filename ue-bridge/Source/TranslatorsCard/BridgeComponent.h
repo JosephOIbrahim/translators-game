@@ -125,6 +125,18 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
     bool IsBridgeConnected() const { return bIsConnected; }
 
+    /** Check if using USD mode (v2.0.0) */
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    bool IsUsingUsdMode() const { return bUsingUsdMode; }
+
+    /** Send acknowledgment via USD (v2.0.0) */
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    void SendAcknowledgeUsda();
+
+    /** Send answer via USD (v2.0.0) */
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    void SendAnswerUsda(const FString& QuestionId, int32 OptionIndex, float ResponseTimeMs);
+
     // === CONFIGURATION ===
 
     /** Bridge directory path (default: ~/.translators) */
@@ -157,7 +169,21 @@ private:
     void HandleTransitionState(const TSharedPtr<FJsonObject>& JsonObj);
     void HandleFinaleState(const TSharedPtr<FJsonObject>& JsonObj);
 
-    // === USD HANDLING ===
+    // === USD NATIVE COMMUNICATION (v2.0.0) ===
+
+    bool ProcessBridgeStateUsda();
+    FString ParseUsdaVariant(const FString& Content, const FString& VariantSetName);
+    FString ParseUsdaAttribute(const FString& Content, const FString& PrimPath, const FString& AttrName);
+    void HandleUsdaReadyState(const FString& Content);
+    void HandleUsdaQuestionState(const FString& Content);
+    void HandleUsdaTransitionState(const FString& Content);
+    void HandleUsdaFinaleState(const FString& Content);
+    FString BuildQuestionJson();
+    FString UpdateUsdaVariant(const FString& Content, const FString& VariantSetName, const FString& NewValue);
+    FString UpdateUsdaAttribute(const FString& Content, const FString& PrimName, const FString& AttrName, const FString& NewValue, bool bIsString);
+    void UpdateBehavioralSignals(FString& Content, float ResponseTimeMs);
+
+    // === USD PROFILE HANDLING ===
 
     void OnUsdFileChanged();
     void ReloadUsdStage();
@@ -176,6 +202,7 @@ private:
 
     bool bIsConnected = false;
     bool bUsePolling = false;
+    bool bUsingUsdMode = false;  // v2.0.0: USD-native mode active
 
     // Debouncing
     float TimeSinceLastStateChange = 0.0f;
@@ -191,4 +218,12 @@ private:
     // Current state
     FString CurrentStateJson;
     FTranslatorsQuestion CurrentQuestion;
+
+    // === BEHAVIORAL SIGNALS (v2.0.0 ADHD_MoE routing) ===
+
+    TArray<float> ResponseTimes;  // Track response times for pattern detection
+    int32 HesitationCount = 0;    // Count of long hesitations (>10s)
+    int32 RapidClickCount = 0;    // Count of rapid clicks (<500ms)
+    int32 SkipCount = 0;          // Count of skipped questions
+    int32 BackNavigationCount = 0; // Count of back navigations
 };

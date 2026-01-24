@@ -1,10 +1,16 @@
 // TranslatorsCard.Build.cs
-// Build configuration for Claude Code → UE5.7 Bridge
+// Build configuration for Claude Code → UE5.7 Bridge v2.0.0
+//
+// v2.0.0 Changes:
+// - USD-native communication via text-based USDA parsing
+// - Behavioral signals for ADHD_MoE expert routing
+// - JSON fallback for backward compatibility
 //
 // Key modules:
 // - DirectoryWatcher: For file change detection
-// - USDImporter: For USD Stage Actor integration
 // - Json/JsonUtilities: For protocol message handling
+// - Regex: For USDA text parsing
+// - USDImporter: Optional, for USD Stage Actor integration (editor-only)
 
 using UnrealBuildTool;
 
@@ -23,7 +29,7 @@ public class TranslatorsCard : ModuleRules
             "InputCore"
         });
 
-        // JSON handling for protocol messages
+        // JSON handling for protocol messages (v1.0.0 fallback)
         PublicDependencyModuleNames.AddRange(new string[]
         {
             "Json",
@@ -36,8 +42,9 @@ public class TranslatorsCard : ModuleRules
             PrivateDependencyModuleNames.Add("DirectoryWatcher");
             PrivateDefinitions.Add("WITH_DIRECTORY_WATCHER=1");
 
-            // USD support (editor-only)
-            // Note: USD integration is handled via Blueprint, not C++
+            // USD Stage Actor support (editor-only)
+            // Note: USDA text parsing works without this module
+            // This is only needed for live USD Stage manipulation
             PrivateDefinitions.Add("WITH_USD_SUPPORT=1");
         }
 
@@ -50,7 +57,10 @@ public class TranslatorsCard : ModuleRules
         });
 
         // Enable IWYU (Include What You Use)
-        bEnforceIWYU = true;
+        IWYUSupport = IWYUSupport.Full;
+
+        // v2.0.0: Bridge version definition
+        PrivateDefinitions.Add("BRIDGE_VERSION=TEXT(\"2.0.0\")");
 
         // Ensure generated headers are available
         PublicIncludePaths.Add(ModuleDirectory);

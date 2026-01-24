@@ -1,5 +1,6 @@
 // BridgeComponent.cpp
 // Claude Code → UE5.7 File-Based Bridge Implementation
+// v2.0.0: USD-native communication with JSON fallback
 
 #include "BridgeComponent.h"
 #include "Misc/FileHelper.h"
@@ -10,6 +11,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
+#include "Internationalization/Regex.h"
 
 // Directory watcher (editor-only)
 #if WITH_DIRECTORY_WATCHER
@@ -32,7 +34,8 @@ void UBridgeComponent::BeginPlay()
     Super::BeginPlay();
 
     BridgeLog(TEXT("========================================"));
-    BridgeLog(TEXT("TRANSLATORS BRIDGE COMPONENT STARTING"));
+    BridgeLog(TEXT("TRANSLATORS BRIDGE COMPONENT v2.0.0"));
+    BridgeLog(TEXT("USD-native communication with JSON fallback"));
     BridgeLog(FString::Printf(TEXT("Bridge Path: %s"), *BridgePath));
     BridgeLog(TEXT("========================================"));
 
@@ -46,9 +49,17 @@ void UBridgeComponent::BeginPlay()
 
     SetupFileWatcher();
 
-    // Check if state file already exists (Claude Code may have started first)
-    FString StateFilePath = GetBridgeFilePath(TEXT("state.json"));
-    if (PlatformFile.FileExists(*StateFilePath))
+    // Check for existing state files (Claude Code may have started first)
+    // Prefer USD over JSON
+    FString UsdFilePath = GetBridgeFilePath(TEXT("bridge_state.usda"));
+    FString JsonFilePath = GetBridgeFilePath(TEXT("state.json"));
+
+    if (PlatformFile.FileExists(*UsdFilePath))
+    {
+        BridgeLog(TEXT("Found existing bridge_state.usda - processing..."));
+        ProcessStateFile();
+    }
+    else if (PlatformFile.FileExists(*JsonFilePath))
     {
         BridgeLog(TEXT("Found existing state.json - processing..."));
         ProcessStateFile();
@@ -187,15 +198,19 @@ void UBridgeComponent::OnDirectoryChanged(const TArray<FFileChangeData>& Changes
             BridgeLog(FString::Printf(TEXT("File changed: %s"), *Change.Filename));
         }
 
-        if (Change.Filename.EndsWith(TEXT("state.json")))
+        // State file changes (JSON or USD bridge state)
+        if (Change.Filename.EndsWith(TEXT("state.json")) ||
+            Change.Filename.EndsWith(TEXT("bridge_state.usda")))
         {
             // Debounce state file changes
             TimeSinceLastStateChange = 0.0f;
             bStateChangePending = true;
         }
-        else if (Change.Filename.EndsWith(TEXT(".usda")))
+        // USD cognitive profile changes (separate from bridge state)
+        else if (Change.Filename.EndsWith(TEXT("cognitive_profile.usda")) ||
+                 Change.Filename.EndsWith(TEXT("cognitive_substrate.usda")))
         {
-            // Debounce USD file changes
+            // Debounce USD profile file changes
             TimeSinceLastUsdChange = 0.0f;
             bUsdChangePending = true;
         }
@@ -208,6 +223,19 @@ void UBridgeComponent::OnDirectoryChanged(const TArray<FFileChangeData>& Changes
 
 void UBridgeComponent::ProcessStateFile()
 {
+    // Try USD mode first (v2.0.0)
+    FString UsdFilePath = GetBridgeFilePath(TEXT("bridge_state.usda"));
+    IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+
+    if (PlatformFile.FileExists(*UsdFilePath))
+    {
+        if (ProcessBridgeStateUsda())
+        {
+            return; // Successfully processed USD
+        }
+    }
+
+    // Fall back to JSON mode (v1.0.0)
     FString FilePath = GetBridgeFilePath(TEXT("state.json"));
     FString Content;
 
@@ -215,7 +243,7 @@ void UBridgeComponent::ProcessStateFile()
     {
         if (bVerboseLogging)
         {
-            BridgeLog(TEXT("Could not read state.json"));
+            BridgeLog(TEXT("Could not read state.json or bridge_state.usda"));
         }
         return;
     }
@@ -231,6 +259,7 @@ void UBridgeComponent::ProcessStateFile()
     }
 
     CurrentStateJson = Content;
+    bUsingUsdMode = false;
 
     // Route by type
     FString StateType;
@@ -371,7 +400,7 @@ void UBridgeComponent::SendAcknowledge()
 
     TSharedPtr<FJsonObject> AckObj = MakeShared<FJsonObject>();
     AckObj->SetBoolField(TEXT("ready"), true);
-    AckObj->SetStringField(TEXT("ue_version"), TEXT("5.7.0"));
+    AckObj->SetStringField(TEXT("ue_version"), TEXT("5.7.2"));
     AckObj->SetStringField(TEXT("project"), TEXT("TranslatorsCard"));
     JsonObj->SetObjectField(TEXT("ack"), AckObj);
 
@@ -451,5 +480,437 @@ void UBridgeComponent::BridgeLog(const FString& Message) const
     {
         GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
             FString::Printf(TEXT("[Bridge] %s"), *Message));
+    }
+}
+
+
+// === USD NATIVE COMMUNICATION (v2.0.0) ===
+
+bool UBridgeComponent::ProcessBridgeStateUsda()
+{
+    FString FilePath = GetBridgeFilePath(TEXT("bridge_state.usda"));
+    FString Content;
+
+    if (!FFileHelper::LoadFileToString(Content, *FilePath))
+    {
+        return false;
+    }
+
+    // Parse sync_status variant
+    FString SyncStatus = ParseUsdaVariant(Content, TEXT("sync_status"));
+    FString MessageType = ParseUsdaVariant(Content, TEXT("message_type"));
+
+    if (bVerboseLogging)
+    {
+        BridgeLog(FString::Printf(TEXT("USD sync_status=%s, message_type=%s"), *SyncStatus, *MessageType));
+    }
+
+    // Route based on message type
+    if (MessageType == TEXT("ready"))
+    {
+        HandleUsdaReadyState(Content);
+    }
+    else if (MessageType == TEXT("question") && SyncStatus == TEXT("question_pending"))
+    {
+        HandleUsdaQuestionState(Content);
+    }
+    else if (MessageType == TEXT("transition"))
+    {
+        HandleUsdaTransitionState(Content);
+    }
+    else if (MessageType == TEXT("finale"))
+    {
+        HandleUsdaFinaleState(Content);
+    }
+
+    return true;
+}
+
+
+FString UBridgeComponent::ParseUsdaVariant(const FString& Content, const FString& VariantSetName)
+{
+    // Parse variant selection from: variants = { string variantName = "value" }
+    FString Pattern = FString::Printf(TEXT("string %s = \"([^\"]*)\""), *VariantSetName);
+    FRegexPattern RegexPattern(Pattern);
+    FRegexMatcher Matcher(RegexPattern, Content);
+
+    if (Matcher.FindNext())
+    {
+        return Matcher.GetCaptureGroup(1);
+    }
+    return TEXT("");
+}
+
+
+FString UBridgeComponent::ParseUsdaAttribute(const FString& Content, const FString& PrimPath, const FString& AttrName)
+{
+    // Find the prim section and extract attribute value
+    // This is a simplified parser - handles basic string/int/float attributes
+
+    // First find the prim section
+    FString PrimPattern = FString::Printf(TEXT("def [^\"]*\"%s\"[^{]*\\{([^}]*)\\}"), *PrimPath);
+    FRegexPattern PrimRegex(PrimPattern);
+    FRegexMatcher PrimMatcher(PrimRegex, Content);
+
+    FString PrimContent;
+    if (PrimMatcher.FindNext())
+    {
+        PrimContent = PrimMatcher.GetCaptureGroup(1);
+    }
+    else
+    {
+        // Try finding nested prim
+        PrimContent = Content;
+    }
+
+    // Parse string attribute
+    FString StringPattern = FString::Printf(TEXT("string %s = \"([^\"]*)\""), *AttrName);
+    FRegexPattern StringRegex(StringPattern);
+    FRegexMatcher StringMatcher(StringRegex, PrimContent);
+    if (StringMatcher.FindNext())
+    {
+        return StringMatcher.GetCaptureGroup(1);
+    }
+
+    // Parse int attribute
+    FString IntPattern = FString::Printf(TEXT("int %s = (-?\\d+)"), *AttrName);
+    FRegexPattern IntRegex(IntPattern);
+    FRegexMatcher IntMatcher(IntRegex, PrimContent);
+    if (IntMatcher.FindNext())
+    {
+        return IntMatcher.GetCaptureGroup(1);
+    }
+
+    // Parse float/double attribute
+    FString FloatPattern = FString::Printf(TEXT("(?:float|double) %s = ([\\d.]+)"), *AttrName);
+    FRegexPattern FloatRegex(FloatPattern);
+    FRegexMatcher FloatMatcher(FloatRegex, PrimContent);
+    if (FloatMatcher.FindNext())
+    {
+        return FloatMatcher.GetCaptureGroup(1);
+    }
+
+    return TEXT("");
+}
+
+
+void UBridgeComponent::HandleUsdaReadyState(const FString& Content)
+{
+    int32 TotalQuestions = FCString::Atoi(*ParseUsdaAttribute(Content, TEXT("Ready"), TEXT("total_questions")));
+    FString FirstScene = ParseUsdaAttribute(Content, TEXT("Ready"), TEXT("first_scene"));
+
+    if (TotalQuestions <= 0) TotalQuestions = 8;
+
+    BridgeLog(FString::Printf(TEXT("USD Ready: %d questions, first scene: %s"), TotalQuestions, *FirstScene));
+
+    bIsConnected = true;
+    bUsingUsdMode = true;
+    OnBridgeReady.Broadcast(TotalQuestions);
+}
+
+
+void UBridgeComponent::HandleUsdaQuestionState(const FString& Content)
+{
+    // Parse Message prim
+    CurrentQuestion = FTranslatorsQuestion();
+    CurrentQuestion.Index = FCString::Atoi(*ParseUsdaAttribute(Content, TEXT("Message"), TEXT("index")));
+    CurrentQuestion.Total = FCString::Atoi(*ParseUsdaAttribute(Content, TEXT("Message"), TEXT("total")));
+    CurrentQuestion.QuestionId = ParseUsdaAttribute(Content, TEXT("Message"), TEXT("question_id"));
+    CurrentQuestion.Text = ParseUsdaAttribute(Content, TEXT("Message"), TEXT("text"));
+    CurrentQuestion.Scene = ParseUsdaAttribute(Content, TEXT("Message"), TEXT("scene"));
+
+    // Parse Options
+    for (int32 i = 0; i < 3; ++i)
+    {
+        FString OptionPrim = FString::Printf(TEXT("Option_%d"), i);
+        FString Label = ParseUsdaAttribute(Content, OptionPrim, TEXT("label"));
+        FString Direction = ParseUsdaAttribute(Content, OptionPrim, TEXT("direction"));
+
+        if (!Label.IsEmpty())
+        {
+            CurrentQuestion.OptionLabels.Add(Label);
+            CurrentQuestion.OptionDirections.Add(Direction);
+        }
+    }
+
+    BridgeLog(FString::Printf(TEXT("USD Question %d/%d: %s"),
+        CurrentQuestion.Index + 1, CurrentQuestion.Total, *CurrentQuestion.QuestionId));
+
+    // Build JSON for backward-compatible delegate
+    CurrentStateJson = BuildQuestionJson();
+    OnQuestionReceived.Broadcast(CurrentStateJson);
+}
+
+
+void UBridgeComponent::HandleUsdaTransitionState(const FString& Content)
+{
+    FString Direction = ParseUsdaAttribute(Content, TEXT("Transition"), TEXT("direction"));
+    FString NextScene = ParseUsdaAttribute(Content, TEXT("Transition"), TEXT("next_scene"));
+    float Progress = FCString::Atof(*ParseUsdaAttribute(Content, TEXT("Transition"), TEXT("progress")));
+
+    BridgeLog(FString::Printf(TEXT("USD Transition: %s -> %s (%.0f%%)"),
+        *Direction, *NextScene, Progress * 100.0f));
+
+    OnTransitionReceived.Broadcast(Direction, NextScene);
+}
+
+
+void UBridgeComponent::HandleUsdaFinaleState(const FString& Content)
+{
+    FString UsdPath = ParseUsdaAttribute(Content, TEXT("Finale"), TEXT("usd_path"));
+    FString Message = ParseUsdaAttribute(Content, TEXT("Finale"), TEXT("message"));
+    FString Checksum = ParseUsdaAttribute(Content, TEXT("Finale"), TEXT("checksum"));
+
+    BridgeLog(FString::Printf(TEXT("USD FINALE: %s (checksum: %s)"), *Message, *Checksum));
+    BridgeLog(FString::Printf(TEXT("Profile path: %s"), *UsdPath));
+
+    OnFinaleReceived.Broadcast(UsdPath);
+}
+
+
+FString UBridgeComponent::BuildQuestionJson()
+{
+    // Build JSON representation for backward-compatible delegates
+    TSharedPtr<FJsonObject> JsonObj = MakeShared<FJsonObject>();
+    JsonObj->SetStringField(TEXT("type"), TEXT("question"));
+    JsonObj->SetNumberField(TEXT("index"), CurrentQuestion.Index);
+    JsonObj->SetNumberField(TEXT("total"), CurrentQuestion.Total);
+    JsonObj->SetStringField(TEXT("id"), CurrentQuestion.QuestionId);
+    JsonObj->SetStringField(TEXT("text"), CurrentQuestion.Text);
+    JsonObj->SetStringField(TEXT("scene"), CurrentQuestion.Scene);
+
+    TArray<TSharedPtr<FJsonValue>> OptionsArray;
+    for (int32 i = 0; i < CurrentQuestion.OptionLabels.Num(); ++i)
+    {
+        TSharedPtr<FJsonObject> OptionObj = MakeShared<FJsonObject>();
+        OptionObj->SetNumberField(TEXT("index"), i);
+        OptionObj->SetStringField(TEXT("label"), CurrentQuestion.OptionLabels[i]);
+        OptionObj->SetStringField(TEXT("direction"), CurrentQuestion.OptionDirections[i]);
+        OptionsArray.Add(MakeShared<FJsonValueObject>(OptionObj));
+    }
+    JsonObj->SetArrayField(TEXT("options"), OptionsArray);
+
+    FString OutputString;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+    FJsonSerializer::Serialize(JsonObj.ToSharedRef(), Writer);
+    return OutputString;
+}
+
+
+void UBridgeComponent::SendAnswerUsda(const FString& QuestionId, int32 OptionIndex, float ResponseTimeMs)
+{
+    FString FilePath = GetBridgeFilePath(TEXT("bridge_state.usda"));
+    FString Content;
+
+    if (!FFileHelper::LoadFileToString(Content, *FilePath))
+    {
+        BridgeLog(TEXT("ERROR: Could not read bridge_state.usda for answer"));
+        // Fall back to JSON
+        SendAnswer(QuestionId, OptionIndex, ResponseTimeMs);
+        return;
+    }
+
+    FString Timestamp = FDateTime::UtcNow().ToIso8601();
+    FString SelectedLabel = (OptionIndex >= 0 && OptionIndex < CurrentQuestion.OptionLabels.Num())
+        ? CurrentQuestion.OptionLabels[OptionIndex] : TEXT("");
+    FString SelectedDirection = (OptionIndex >= 0 && OptionIndex < CurrentQuestion.OptionDirections.Num())
+        ? CurrentQuestion.OptionDirections[OptionIndex] : TEXT("");
+
+    // Update sync_status variant to "answer_received"
+    Content = UpdateUsdaVariant(Content, TEXT("sync_status"), TEXT("answer_received"));
+    Content = UpdateUsdaVariant(Content, TEXT("message_type"), TEXT("answer"));
+
+    // Update Answer prim attributes
+    Content = UpdateUsdaAttribute(Content, TEXT("Answer"), TEXT("question_id"), QuestionId, true);
+    Content = UpdateUsdaAttribute(Content, TEXT("Answer"), TEXT("option_index"), FString::FromInt(OptionIndex), false);
+    Content = UpdateUsdaAttribute(Content, TEXT("Answer"), TEXT("response_time_ms"), FString::SanitizeFloat(ResponseTimeMs), false);
+    Content = UpdateUsdaAttribute(Content, TEXT("Answer"), TEXT("selected_label"), SelectedLabel, true);
+    Content = UpdateUsdaAttribute(Content, TEXT("Answer"), TEXT("selected_direction"), SelectedDirection, true);
+    Content = UpdateUsdaAttribute(Content, TEXT("Answer"), TEXT("timestamp"), Timestamp, true);
+
+    // Update behavioral signals
+    UpdateBehavioralSignals(Content, ResponseTimeMs);
+
+    // Write back
+    int32 MaxRetries = 3;
+    for (int32 Retry = 0; Retry < MaxRetries; ++Retry)
+    {
+        if (FFileHelper::SaveStringToFile(Content, *FilePath))
+        {
+            BridgeLog(FString::Printf(TEXT("USD answer sent: %s = option %d (%.0fms)"),
+                *QuestionId, OptionIndex, ResponseTimeMs));
+            return;
+        }
+        FPlatformProcess::Sleep(0.1f);
+    }
+
+    BridgeLog(TEXT("ERROR: Failed to write USD answer, falling back to JSON"));
+    SendAnswer(QuestionId, OptionIndex, ResponseTimeMs);
+}
+
+
+FString UBridgeComponent::UpdateUsdaVariant(const FString& Content, const FString& VariantSetName, const FString& NewValue)
+{
+    // Simple string replacement for variant - more reliable than regex
+    FString SearchPattern = FString::Printf(TEXT("string %s = \""), *VariantSetName);
+    int32 StartIdx = Content.Find(SearchPattern);
+    if (StartIdx == INDEX_NONE)
+    {
+        return Content;
+    }
+
+    StartIdx += SearchPattern.Len();
+    int32 EndIdx = Content.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, StartIdx);
+    if (EndIdx == INDEX_NONE)
+    {
+        return Content;
+    }
+
+    // Build new content
+    FString Result = Content.Left(StartIdx) + NewValue + Content.Mid(EndIdx);
+    return Result;
+}
+
+
+FString UBridgeComponent::UpdateUsdaAttribute(const FString& Content, const FString& PrimName, const FString& AttrName, const FString& NewValue, bool bIsString)
+{
+    // Find attribute pattern and replace value
+    // For string: string attrName = "value"
+    // For numeric: int/float/double attrName = value
+
+    FString Result = Content;
+
+    if (bIsString)
+    {
+        // Find: string attrName = "..."
+        FString SearchPattern = FString::Printf(TEXT("string %s = \""), *AttrName);
+        int32 StartIdx = Result.Find(SearchPattern);
+        if (StartIdx != INDEX_NONE)
+        {
+            StartIdx += SearchPattern.Len();
+            int32 EndIdx = Result.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, StartIdx);
+            if (EndIdx != INDEX_NONE)
+            {
+                FString EscapedValue = NewValue.Replace(TEXT("\\"), TEXT("\\\\")).Replace(TEXT("\""), TEXT("\\\""));
+                Result = Result.Left(StartIdx) + EscapedValue + Result.Mid(EndIdx);
+            }
+        }
+    }
+    else
+    {
+        // Find numeric attributes: int/float/double attrName = value
+        TArray<FString> TypePrefixes = { TEXT("int"), TEXT("float"), TEXT("double"), TEXT("bool") };
+
+        for (const FString& TypePrefix : TypePrefixes)
+        {
+            FString SearchPattern = FString::Printf(TEXT("%s %s = "), *TypePrefix, *AttrName);
+            int32 StartIdx = Result.Find(SearchPattern);
+            if (StartIdx != INDEX_NONE)
+            {
+                StartIdx += SearchPattern.Len();
+                // Find end of value (newline or space or semicolon)
+                int32 EndIdx = StartIdx;
+                while (EndIdx < Result.Len())
+                {
+                    TCHAR C = Result[EndIdx];
+                    if (C == '\n' || C == '\r' || C == ';' || C == ' ' || C == '\t')
+                    {
+                        break;
+                    }
+                    EndIdx++;
+                }
+                Result = Result.Left(StartIdx) + NewValue + Result.Mid(EndIdx);
+                break;
+            }
+        }
+    }
+
+    return Result;
+}
+
+
+void UBridgeComponent::UpdateBehavioralSignals(FString& Content, float ResponseTimeMs)
+{
+    // Track behavioral signals for ADHD_MoE routing
+    ResponseTimes.Add(ResponseTimeMs);
+
+    // Calculate average response time
+    float TotalTime = 0.0f;
+    for (float Time : ResponseTimes)
+    {
+        TotalTime += Time;
+    }
+    float AvgResponseTime = ResponseTimes.Num() > 0 ? TotalTime / ResponseTimes.Num() : 0.0f;
+
+    // Detect hesitation (response > 10 seconds)
+    bool bLongHesitation = ResponseTimeMs > 10000.0f;
+    if (bLongHesitation)
+    {
+        HesitationCount++;
+    }
+
+    // Determine detected state based on patterns
+    FString DetectedState = TEXT("focused");
+    FString RecommendedExpert = TEXT("Direct");
+
+    if (bLongHesitation || HesitationCount > 2)
+    {
+        DetectedState = TEXT("stuck");
+        RecommendedExpert = TEXT("Scaffolder");
+    }
+    else if (ResponseTimeMs < 500.0f && ResponseTimes.Num() > 1)
+    {
+        // Very fast response might indicate frustration or clicking through
+        RapidClickCount++;
+        if (RapidClickCount > 2)
+        {
+            DetectedState = TEXT("frustrated");
+            RecommendedExpert = TEXT("Validator");
+        }
+    }
+
+    // Update signals in content
+    Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("last_response_time_ms"), FString::SanitizeFloat(ResponseTimeMs), false);
+    Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("average_response_time_ms"), FString::SanitizeFloat(AvgResponseTime), false);
+    Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("hesitation_count"), FString::FromInt(HesitationCount), false);
+    Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("long_hesitation_detected"), bLongHesitation ? TEXT("true") : TEXT("false"), false);
+    Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("rapid_click_count"), FString::FromInt(RapidClickCount), false);
+    Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("detected_state"), DetectedState, true);
+    Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("recommended_expert"), RecommendedExpert, true);
+}
+
+
+void UBridgeComponent::SendAcknowledgeUsda()
+{
+    FString FilePath = GetBridgeFilePath(TEXT("bridge_state.usda"));
+    FString Content;
+
+    if (!FFileHelper::LoadFileToString(Content, *FilePath))
+    {
+        BridgeLog(TEXT("USD ack: bridge_state.usda not found, sending JSON ack"));
+        SendAcknowledge();
+        return;
+    }
+
+    FString Timestamp = FDateTime::UtcNow().ToIso8601();
+
+    // Update message_type to "ack"
+    Content = UpdateUsdaVariant(Content, TEXT("message_type"), TEXT("ack"));
+
+    // Update Ack prim
+    Content = UpdateUsdaAttribute(Content, TEXT("Ack"), TEXT("ready"), TEXT("true"), false);
+    Content = UpdateUsdaAttribute(Content, TEXT("Ack"), TEXT("ue_version"), TEXT("5.7.2"), true);
+    Content = UpdateUsdaAttribute(Content, TEXT("Ack"), TEXT("project"), TEXT("TranslatorsCard"), true);
+    Content = UpdateUsdaAttribute(Content, TEXT("Ack"), TEXT("timestamp"), Timestamp, true);
+
+    if (FFileHelper::SaveStringToFile(Content, *FilePath))
+    {
+        BridgeLog(TEXT("USD acknowledgment sent"));
+        bUsingUsdMode = true;
+    }
+    else
+    {
+        BridgeLog(TEXT("USD ack failed, sending JSON"));
+        SendAcknowledge();
     }
 }
