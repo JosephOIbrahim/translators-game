@@ -645,10 +645,15 @@ def write_finale_usda(
     message: str = "Cognitive profile complete!",
     total_questions: int = 8,
     questions_answered: int = 8,
-    bridge_path: Optional[Path] = None
+    bridge_path: Optional[Path] = None,
+    expert: str = "Direct",
+    paradigm: str = "Cortex",
+    altitude: str = "Ground"
 ) -> bool:
     """
     Write finale state to bridge_state.usda.
+
+    ThinkingMachines [He2025] compliant: Includes [EXEC:...] anchor with routing params.
 
     Args:
         usd_path: Path to the generated cognitive profile USD
@@ -657,10 +662,24 @@ def write_finale_usda(
         total_questions: Total number of questions
         questions_answered: Number of questions actually answered
         bridge_path: Optional custom bridge directory
+        expert: Final routed expert (for EXEC anchor)
+        paradigm: Final paradigm (for EXEC anchor)
+        altitude: Final altitude (for EXEC anchor)
 
     Returns:
         True if successful, False otherwise
     """
+    # Generate ThinkingMachines-compliant EXEC anchor
+    exec_anchor = generate_exec_anchor(
+        checksum=checksum,
+        expert=expert,
+        paradigm=paradigm,
+        altitude=altitude,
+        verbosity="standard",
+        think_depth="standard"
+    )
+    # Append anchor to message for traceability
+    message_with_anchor = f"{message} {exec_anchor}"
     file_path = get_bridge_file_path(bridge_path)
 
     if not file_path.exists():
@@ -668,11 +687,11 @@ def write_finale_usda(
 
     if HAS_PXR:
         return _write_finale_pxr(
-            file_path, usd_path, checksum, message, total_questions, questions_answered
+            file_path, usd_path, checksum, message_with_anchor, total_questions, questions_answered
         )
     else:
         return _write_finale_text(
-            file_path, usd_path, checksum, message, total_questions, questions_answered
+            file_path, usd_path, checksum, message_with_anchor, total_questions, questions_answered
         )
 
 
@@ -993,6 +1012,148 @@ def read_behavioral_signals(bridge_path: Optional[Path] = None) -> Optional[Dict
     except Exception as e:
         print(f"[USD Bridge] Error reading behavioral signals: {e}")
         return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# THINKINGMACHINES [He2025] BATCH-INVARIANCE COMPLIANT ANCHORS
+# Same signals → Same routing → Same behavior
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def compute_checksum(dimensions: Dict[str, Any]) -> str:
+    """
+    Compute deterministic checksum for profile (ThinkingMachines [He2025] compliant).
+
+    FIXED algorithm: Sort alphabetically, serialize, DJB2 hash to 8-char hex.
+    Same inputs ALWAYS produce same output regardless of call order or batch size.
+
+    Args:
+        dimensions: Dict of profile dimensions
+
+    Returns:
+        8-character hex checksum
+    """
+    # FIXED: Sort alphabetically for determinism
+    sorted_dims = sorted(dimensions.items())
+
+    # FIXED: Serialize format TRL_v1|key:value|key:value|...
+    serialized = "TRL_v1|" + "|".join(f"{k}:{v}" for k, v in sorted_dims)
+
+    # FIXED: DJB2 hash algorithm (batch-invariant)
+    hash_val = 5381
+    for char in serialized:
+        hash_val = ((hash_val << 5) + hash_val) + ord(char)
+        hash_val &= 0xFFFFFFFF  # Keep 32-bit
+
+    return format(hash_val, '08x')
+
+
+def generate_exec_anchor(
+    checksum: str,
+    expert: str = "Direct",
+    paradigm: str = "Cortex",
+    altitude: str = "Ground",
+    verbosity: str = "standard",
+    think_depth: str = "standard"
+) -> str:
+    """
+    Generate ThinkingMachines-compliant [EXEC:...] anchor.
+
+    Format: [EXEC:{checksum}|{expert}|{paradigm}|{altitude}|{verbosity}|{think_depth}]
+
+    This anchor encodes the routing parameters used for this response,
+    enabling reproducibility verification per ThinkingMachines [He2025].
+
+    Args:
+        checksum: Profile checksum (8 hex chars)
+        expert: ADHD_MoE expert (Validator|Scaffolder|Restorer|Refocuser|Celebrator|Socratic|Direct)
+        paradigm: Cortex (hierarchical) or Mycelium (emergent)
+        altitude: 30000ft|15000ft|5000ft|Ground
+        verbosity: minimal|standard|detailed
+        think_depth: minimal|standard|deep|ultradeep
+
+    Returns:
+        Formatted [EXEC:...] anchor string
+    """
+    return f"[EXEC:{checksum}|{expert}|{paradigm}|{altitude}|{verbosity}|{think_depth}]"
+
+
+def parse_exec_anchor(anchor: str) -> Optional[Dict[str, str]]:
+    """
+    Parse [EXEC:...] anchor to extract routing parameters.
+
+    Args:
+        anchor: The [EXEC:...] anchor string
+
+    Returns:
+        Dict with checksum, expert, paradigm, altitude, verbosity, think_depth
+        or None if parsing fails
+    """
+    match = re.match(r'\[EXEC:([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^|]+)\|([^\]]+)\]', anchor)
+    if not match:
+        return None
+
+    return {
+        "checksum": match.group(1),
+        "expert": match.group(2),
+        "paradigm": match.group(3),
+        "altitude": match.group(4),
+        "verbosity": match.group(5),
+        "think_depth": match.group(6)
+    }
+
+
+def get_expert_from_signals(signals: Dict[str, Any]) -> str:
+    """
+    Route to ADHD_MoE expert based on behavioral signals.
+
+    FIXED PRIORITY (first match wins - ThinkingMachines compliant):
+    1. Validator  - frustrated, RED, caps, negative
+    2. Scaffolder - overwhelmed, stuck, too_many
+    3. Restorer   - depleted, ORANGE, post-crash
+    4. Refocuser  - distracted, tangent_over
+    5. Celebrator - task_complete, milestone
+    6. Socratic   - exploring, high_energy, what if
+    7. Direct     - focused, hyperfocused, flow (DEFAULT)
+
+    Args:
+        signals: Behavioral signals dict
+
+    Returns:
+        Expert name string
+    """
+    detected_state = signals.get("detected_state", "focused")
+    burnout_level = signals.get("burnout_level", "GREEN")
+    rapid_clicks = signals.get("rapid_click_count", 0)
+    hesitations = signals.get("hesitation_count", 0)
+
+    # FIXED priority order - NEVER reorder or skip
+
+    # Priority 1: Validator
+    if detected_state == "frustrated" or burnout_level == "RED" or rapid_clicks > 3:
+        return "Validator"
+
+    # Priority 2: Scaffolder
+    if detected_state in ("stuck", "overwhelmed") or hesitations > 2:
+        return "Scaffolder"
+
+    # Priority 3: Restorer
+    if detected_state == "depleted" or burnout_level == "ORANGE":
+        return "Restorer"
+
+    # Priority 4: Refocuser
+    if detected_state == "distracted":
+        return "Refocuser"
+
+    # Priority 5: Celebrator
+    if detected_state == "completing":
+        return "Celebrator"
+
+    # Priority 6: Socratic
+    if detected_state == "exploring":
+        return "Socratic"
+
+    # Priority 7: Direct (DEFAULT)
+    return "Direct"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

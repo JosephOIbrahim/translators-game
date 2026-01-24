@@ -831,10 +831,16 @@ FString UBridgeComponent::UpdateUsdaAttribute(const FString& Content, const FStr
 
 void UBridgeComponent::UpdateBehavioralSignals(FString& Content, float ResponseTimeMs)
 {
-    // Track behavioral signals for ADHD_MoE routing
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // THINKINGMACHINES [He2025] BATCH-INVARIANCE COMPLIANT
+    // Same signals → Same routing → Same behavior
+    // FIXED thresholds ensure deterministic expert selection regardless of load
+    // ═══════════════════════════════════════════════════════════════════════════════
+
+    // PHASE 1: DETECT - Collect signals
     ResponseTimes.Add(ResponseTimeMs);
 
-    // Calculate average response time
+    // Calculate average response time (FIXED algorithm - sum/count)
     float TotalTime = 0.0f;
     for (float Time : ResponseTimes)
     {
@@ -842,34 +848,96 @@ void UBridgeComponent::UpdateBehavioralSignals(FString& Content, float ResponseT
     }
     float AvgResponseTime = ResponseTimes.Num() > 0 ? TotalTime / ResponseTimes.Num() : 0.0f;
 
-    // Detect hesitation (response > 10 seconds)
-    bool bLongHesitation = ResponseTimeMs > 10000.0f;
+    // FIXED THRESHOLDS (batch-invariant - same across all sessions)
+    const float HESITATION_THRESHOLD_MS = 10000.0f;   // 10 seconds
+    const float RAPID_CLICK_THRESHOLD_MS = 500.0f;    // 0.5 seconds
+    const float DEPLETED_AVG_THRESHOLD_MS = 15000.0f; // 15 seconds average
+    const int32 HESITATION_COUNT_THRESHOLD = 2;
+    const int32 RAPID_CLICK_COUNT_THRESHOLD = 3;
+
+    // Detect hesitation
+    bool bLongHesitation = ResponseTimeMs > HESITATION_THRESHOLD_MS;
     if (bLongHesitation)
     {
         HesitationCount++;
     }
 
-    // Determine detected state based on patterns
+    // Detect rapid clicking
+    bool bRapidClick = ResponseTimeMs < RAPID_CLICK_THRESHOLD_MS && ResponseTimes.Num() > 1;
+    if (bRapidClick)
+    {
+        RapidClickCount++;
+    }
+
+    // PHASE 2: CASCADE - ADHD_MoE FIXED PRIORITY ROUTING
+    // Priority: Validator(1) > Scaffolder(2) > Restorer(3) > Refocuser(4) > Celebrator(5) > Socratic(6) > Direct(7)
+    // First match wins - NEVER skip or reorder
+
     FString DetectedState = TEXT("focused");
     FString RecommendedExpert = TEXT("Direct");
+    FString BurnoutLevel = TEXT("GREEN");
+    FString MomentumPhase = TEXT("rolling");
 
-    if (bLongHesitation || HesitationCount > 2)
+    // Priority 1: Validator - frustrated, RED burnout, caps, negative signals
+    if (RapidClickCount > RAPID_CLICK_COUNT_THRESHOLD)
+    {
+        DetectedState = TEXT("frustrated");
+        RecommendedExpert = TEXT("Validator");
+        BurnoutLevel = TEXT("RED");
+        MomentumPhase = TEXT("crashed");
+    }
+    // Priority 2: Scaffolder - overwhelmed, stuck, too_many signals
+    else if (bLongHesitation || HesitationCount > HESITATION_COUNT_THRESHOLD)
     {
         DetectedState = TEXT("stuck");
         RecommendedExpert = TEXT("Scaffolder");
+        BurnoutLevel = TEXT("ORANGE");
+        MomentumPhase = TEXT("declining");
     }
-    else if (ResponseTimeMs < 500.0f && ResponseTimes.Num() > 1)
+    // Priority 3: Restorer - depleted, ORANGE burnout, post-crash
+    else if (AvgResponseTime > DEPLETED_AVG_THRESHOLD_MS)
     {
-        // Very fast response might indicate frustration or clicking through
-        RapidClickCount++;
-        if (RapidClickCount > 2)
-        {
-            DetectedState = TEXT("frustrated");
-            RecommendedExpert = TEXT("Validator");
-        }
+        DetectedState = TEXT("depleted");
+        RecommendedExpert = TEXT("Restorer");
+        BurnoutLevel = TEXT("ORANGE");
+        MomentumPhase = TEXT("crashed");
+    }
+    // Priority 4: Refocuser - distracted, tangent signals
+    else if (ResponseTimes.Num() > 3 && ResponseTimeMs > AvgResponseTime * 2.0f)
+    {
+        DetectedState = TEXT("distracted");
+        RecommendedExpert = TEXT("Refocuser");
+        BurnoutLevel = TEXT("YELLOW");
+        MomentumPhase = TEXT("declining");
+    }
+    // Priority 5: Celebrator - task_complete, milestone reached
+    else if (CurrentQuestion.Index == CurrentQuestion.Total - 1)
+    {
+        DetectedState = TEXT("completing");
+        RecommendedExpert = TEXT("Celebrator");
+        BurnoutLevel = TEXT("GREEN");
+        MomentumPhase = TEXT("peak");
+    }
+    // Priority 6: Socratic - exploring, high energy, "what if" signals
+    else if (ResponseTimes.Num() >= 2 && ResponseTimeMs > 3000.0f && ResponseTimeMs < 8000.0f)
+    {
+        DetectedState = TEXT("exploring");
+        RecommendedExpert = TEXT("Socratic");
+        BurnoutLevel = TEXT("GREEN");
+        MomentumPhase = TEXT("building");
+    }
+    // Priority 7: Direct - focused, hyperfocused, flow state (DEFAULT)
+    else
+    {
+        DetectedState = TEXT("focused");
+        RecommendedExpert = TEXT("Direct");
+        BurnoutLevel = TEXT("GREEN");
+        MomentumPhase = (ResponseTimes.Num() > 5) ? TEXT("rolling") : TEXT("building");
     }
 
-    // Update signals in content
+    // PHASE 3: LOCK - Parameters locked for this response (no further changes)
+
+    // PHASE 4: EXECUTE - Update signals in USD content
     Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("last_response_time_ms"), FString::SanitizeFloat(ResponseTimeMs), false);
     Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("average_response_time_ms"), FString::SanitizeFloat(AvgResponseTime), false);
     Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("hesitation_count"), FString::FromInt(HesitationCount), false);
@@ -877,6 +945,15 @@ void UBridgeComponent::UpdateBehavioralSignals(FString& Content, float ResponseT
     Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("rapid_click_count"), FString::FromInt(RapidClickCount), false);
     Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("detected_state"), DetectedState, true);
     Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("recommended_expert"), RecommendedExpert, true);
+    Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("burnout_level"), BurnoutLevel, true);
+    Content = UpdateUsdaAttribute(Content, TEXT("BehavioralSignals"), TEXT("momentum_phase"), MomentumPhase, true);
+
+    // PHASE 5: UPDATE - Log routing decision for traceability
+    if (bVerboseLogging)
+    {
+        BridgeLog(FString::Printf(TEXT("[EXEC] State=%s Expert=%s Burnout=%s Momentum=%s"),
+            *DetectedState, *RecommendedExpert, *BurnoutLevel, *MomentumPhase));
+    }
 }
 
 
