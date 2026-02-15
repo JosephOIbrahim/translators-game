@@ -80,6 +80,9 @@ private:
     /** Update all indicator visuals */
     void RefreshIndicators();
 
+    /** Build widget tree programmatically (no Blueprint required) */
+    void BuildWidgetTree();
+
     /** Created indicator images */
     UPROPERTY()
     TArray<UImage*> IndicatorImages;

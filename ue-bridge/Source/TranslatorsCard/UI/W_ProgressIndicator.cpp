@@ -1,11 +1,14 @@
 // W_ProgressIndicator.cpp
 // Implementation of progress indicator widget
+// Programmatic UI - no Blueprint required
 
 #include "W_ProgressIndicator.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Blueprint/WidgetTree.h"
 
 
@@ -26,6 +29,12 @@ void UW_ProgressIndicator::NativeConstruct()
 {
     Super::NativeConstruct();
 
+    // Build widget tree programmatically if not bound from Blueprint
+    if (!IndicatorContainer)
+    {
+        BuildWidgetTree();
+    }
+
     // Create indicator images if we have a container
     if (IndicatorContainer)
     {
@@ -41,11 +50,11 @@ void UW_ProgressIndicator::NativeConstruct()
                 Indicator->SetDesiredSizeOverride(FVector2D(12.0f, 12.0f));
 
                 // Add to container
-                UHorizontalBoxSlot* Slot = IndicatorContainer->AddChildToHorizontalBox(Indicator);
-                if (Slot)
+                UHorizontalBoxSlot* IndicatorSlot = IndicatorContainer->AddChildToHorizontalBox(Indicator);
+                if (IndicatorSlot)
                 {
-                    Slot->SetPadding(FMargin(4.0f, 0.0f, 4.0f, 0.0f));
-                    Slot->SetVerticalAlignment(VAlign_Center);
+                    IndicatorSlot->SetPadding(FMargin(4.0f, 0.0f, 4.0f, 0.0f));
+                    IndicatorSlot->SetVerticalAlignment(VAlign_Center);
                 }
 
                 IndicatorImages.Add(Indicator);
@@ -87,10 +96,10 @@ void UW_ProgressIndicator::SetTotalQuestions(int32 Total)
             if (Indicator)
             {
                 Indicator->SetDesiredSizeOverride(FVector2D(12.0f, 12.0f));
-                UHorizontalBoxSlot* Slot = IndicatorContainer->AddChildToHorizontalBox(Indicator);
-                if (Slot)
+                UHorizontalBoxSlot* IndicatorSlot = IndicatorContainer->AddChildToHorizontalBox(Indicator);
+                if (IndicatorSlot)
                 {
-                    Slot->SetPadding(FMargin(4.0f, 0.0f, 4.0f, 0.0f));
+                    IndicatorSlot->SetPadding(FMargin(4.0f, 0.0f, 4.0f, 0.0f));
                 }
                 IndicatorImages.Add(Indicator);
             }
@@ -145,4 +154,25 @@ void UW_ProgressIndicator::RefreshIndicators()
         FString LabelText = FString::Printf(TEXT("%d / %d"), CurrentQuestion, TotalQuestions);
         ProgressLabel->SetText(FText::FromString(LabelText));
     }
+}
+
+
+void UW_ProgressIndicator::BuildWidgetTree()
+{
+    // Create root canvas
+    UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
+    WidgetTree->RootWidget = RootCanvas;
+
+    // Create horizontal container for indicators
+    IndicatorContainer = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("IndicatorContainer"));
+
+    UCanvasPanelSlot* ContainerSlot = RootCanvas->AddChildToCanvas(IndicatorContainer);
+    if (ContainerSlot)
+    {
+        ContainerSlot->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
+        ContainerSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+        ContainerSlot->SetAutoSize(true);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[W_ProgressIndicator] Built programmatic widget tree"));
 }

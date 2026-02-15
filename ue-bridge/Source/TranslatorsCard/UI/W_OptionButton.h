@@ -107,4 +107,7 @@ private:
     void HandleButtonUnhovered();
 
     void UpdateVisualState(const FLinearColor& BackgroundColor);
+
+    /** Build widget tree programmatically (no Blueprint required) */
+    void BuildWidgetTree();
 };

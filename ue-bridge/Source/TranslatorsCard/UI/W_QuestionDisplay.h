@@ -112,6 +112,9 @@ private:
     /** Create option buttons for current question */
     void CreateOptionButtons();
 
+    /** Build widget tree programmatically (no Blueprint required) */
+    void BuildWidgetTree();
+
     /** Currently selected option (-1 = none) */
     int32 SelectedOptionIndex = -1;
 

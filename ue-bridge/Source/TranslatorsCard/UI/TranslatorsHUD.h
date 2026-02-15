@@ -67,6 +67,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Translators|Bridge")
     void SendAcknowledgment();
 
+    virtual void Tick(float DeltaSeconds) override;
+    virtual void DrawHUD() override;
+
 protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -120,9 +123,15 @@ private:
     /** Show finale screen */
     void ShowFinaleScreen(const FString& Message);
 
+    /** Update transition animation in Tick */
+    void UpdateTransition(float DeltaSeconds);
+
     /** Reference to bridge component */
     UPROPERTY()
     UBridgeComponent* BridgeComponent;
+
+    /** Handle keyboard input for option selection */
+    void HandleKeyInput();
 
     /** Time when current question was shown */
     float QuestionStartTime = 0.0f;
@@ -132,4 +141,22 @@ private:
 
     /** Total questions for progress tracking */
     int32 TotalQuestions = 8;
+
+    // === TRANSITION STATE ===
+
+    enum class EHUDTransition : uint8
+    {
+        None,           // Idle - accepting input
+        AnswerHold,     // Brief hold showing selected answer (0.7s)
+        FadeOut,        // Fading out question widget (0.3s)
+        WaitForNext,    // Waiting for next question from bridge
+        FadeIn          // Fading in new question (0.3s)
+    };
+
+    EHUDTransition TransitionState = EHUDTransition::None;
+    float TransitionTimer = 0.0f;
+    int32 PendingAnswerIndex = -1;
+
+    static constexpr float ANSWER_HOLD_TIME = 0.7f;
+    static constexpr float FADE_DURATION = 0.3f;
 };

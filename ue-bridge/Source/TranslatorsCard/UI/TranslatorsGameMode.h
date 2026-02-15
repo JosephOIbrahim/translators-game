@@ -14,7 +14,7 @@
  * Sets up:
  * - TranslatorsHUD as default HUD class
  * - Default pawn (none needed for questionnaire)
- * - Player controller settings
+ * - Auto-spawns BridgeActor with BridgeComponent (no manual placement needed)
  */
 UCLASS()
 class TRANSLATORSCARD_API ATranslatorsGameMode : public AGameModeBase
@@ -23,4 +23,11 @@ class TRANSLATORSCARD_API ATranslatorsGameMode : public AGameModeBase
 
 public:
     ATranslatorsGameMode();
+
+    virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
+
+private:
+    /** The auto-spawned bridge actor */
+    UPROPERTY()
+    AActor* BridgeActor;
 };

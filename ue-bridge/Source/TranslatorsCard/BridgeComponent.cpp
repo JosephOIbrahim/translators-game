@@ -24,8 +24,29 @@ UBridgeComponent::UBridgeComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
 
-    // Default path: ~/.translators on Windows/Linux/Mac
-    BridgePath = FPaths::Combine(FPlatformProcess::UserHomeDir(), TEXT(".translators"));
+    // Resolve home directory reliably on Windows
+    // FPlatformProcess::UserHomeDir() can return Documents folder on some configs
+    FString HomePath;
+
+#if PLATFORM_WINDOWS
+    // Use USERPROFILE env var directly (most reliable on Windows)
+    FString UserProfile = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
+    if (!UserProfile.IsEmpty())
+    {
+        HomePath = UserProfile;
+    }
+    else
+    {
+        HomePath = FPlatformProcess::UserHomeDir();
+    }
+#else
+    HomePath = FPlatformProcess::UserHomeDir();
+#endif
+
+    // Clean up path separators and trailing slashes
+    FPaths::NormalizeDirectoryName(HomePath);
+
+    BridgePath = FPaths::Combine(HomePath, TEXT(".translators"));
 }
 
 
@@ -37,6 +58,7 @@ void UBridgeComponent::BeginPlay()
     BridgeLog(TEXT("TRANSLATORS BRIDGE COMPONENT v2.0.0"));
     BridgeLog(TEXT("USD-native communication with JSON fallback"));
     BridgeLog(FString::Printf(TEXT("Bridge Path: %s"), *BridgePath));
+    BridgeLog(FString::Printf(TEXT("Resolved state.json: %s"), *GetBridgeFilePath(TEXT("state.json"))));
     BridgeLog(TEXT("========================================"));
 
     // Ensure bridge directory exists
@@ -239,12 +261,12 @@ void UBridgeComponent::ProcessStateFile()
     FString FilePath = GetBridgeFilePath(TEXT("state.json"));
     FString Content;
 
+    BridgeLog(FString::Printf(TEXT("Attempting to read: %s"), *FilePath));
+
     if (!FFileHelper::LoadFileToString(Content, *FilePath))
     {
-        if (bVerboseLogging)
-        {
-            BridgeLog(TEXT("Could not read state.json or bridge_state.usda"));
-        }
+        BridgeLog(FString::Printf(TEXT("FAILED to read: %s (exists: %d)"),
+            *FilePath, PlatformFile.FileExists(*FilePath) ? 1 : 0));
         return;
     }
 
@@ -291,8 +313,13 @@ void UBridgeComponent::ProcessStateFile()
 
 void UBridgeComponent::HandleReadyState(const TSharedPtr<FJsonObject>& JsonObj)
 {
-    int32 TotalQuestions = JsonObj->GetIntegerField(TEXT("total_questions"));
-    FString FirstScene = JsonObj->GetStringField(TEXT("first_scene"));
+    // Support both flat and nested "ready" object
+    const TSharedPtr<FJsonObject>* ReadyObjPtr;
+    const TSharedPtr<FJsonObject>& ReadyData =
+        JsonObj->TryGetObjectField(TEXT("ready"), ReadyObjPtr) ? *ReadyObjPtr : JsonObj;
+
+    int32 TotalQuestions = ReadyData->GetIntegerField(TEXT("total_questions"));
+    FString FirstScene = ReadyData->GetStringField(TEXT("first_scene"));
 
     BridgeLog(FString::Printf(TEXT("Claude Code ready! Total questions: %d, First scene: %s"),
         TotalQuestions, *FirstScene));
@@ -304,17 +331,22 @@ void UBridgeComponent::HandleReadyState(const TSharedPtr<FJsonObject>& JsonObj)
 
 void UBridgeComponent::HandleQuestionState(const TSharedPtr<FJsonObject>& JsonObj)
 {
+    // Protocol nests question data under "question" key, but also support flat format
+    const TSharedPtr<FJsonObject>* QuestionObjPtr;
+    const TSharedPtr<FJsonObject>& QuestionData =
+        JsonObj->TryGetObjectField(TEXT("question"), QuestionObjPtr) ? *QuestionObjPtr : JsonObj;
+
     // Parse into struct
     CurrentQuestion = FTranslatorsQuestion();
-    CurrentQuestion.Index = JsonObj->GetIntegerField(TEXT("index"));
-    CurrentQuestion.Total = JsonObj->GetIntegerField(TEXT("total"));
-    CurrentQuestion.QuestionId = JsonObj->GetStringField(TEXT("id"));
-    CurrentQuestion.Text = JsonObj->GetStringField(TEXT("text"));
-    CurrentQuestion.Scene = JsonObj->GetStringField(TEXT("scene"));
+    CurrentQuestion.Index = QuestionData->GetIntegerField(TEXT("index"));
+    CurrentQuestion.Total = QuestionData->GetIntegerField(TEXT("total"));
+    CurrentQuestion.QuestionId = QuestionData->GetStringField(TEXT("id"));
+    CurrentQuestion.Text = QuestionData->GetStringField(TEXT("text"));
+    CurrentQuestion.Scene = QuestionData->GetStringField(TEXT("scene"));
 
     // Parse options array
     const TArray<TSharedPtr<FJsonValue>>* OptionsArray;
-    if (JsonObj->TryGetArrayField(TEXT("options"), OptionsArray))
+    if (QuestionData->TryGetArrayField(TEXT("options"), OptionsArray))
     {
         for (const TSharedPtr<FJsonValue>& OptionVal : *OptionsArray)
         {
@@ -337,9 +369,13 @@ void UBridgeComponent::HandleQuestionState(const TSharedPtr<FJsonObject>& JsonOb
 
 void UBridgeComponent::HandleTransitionState(const TSharedPtr<FJsonObject>& JsonObj)
 {
-    FString Direction = JsonObj->GetStringField(TEXT("direction"));
-    FString NextScene = JsonObj->GetStringField(TEXT("next_scene"));
-    float Progress = JsonObj->GetNumberField(TEXT("progress"));
+    const TSharedPtr<FJsonObject>* TransObjPtr;
+    const TSharedPtr<FJsonObject>& TransData =
+        JsonObj->TryGetObjectField(TEXT("transition"), TransObjPtr) ? *TransObjPtr : JsonObj;
+
+    FString Direction = TransData->GetStringField(TEXT("direction"));
+    FString NextScene = TransData->GetStringField(TEXT("next_scene"));
+    float Progress = TransData->GetNumberField(TEXT("progress"));
 
     BridgeLog(FString::Printf(TEXT("Transition: %s -> %s (%.0f%%)"),
         *Direction, *NextScene, Progress * 100.0f));
@@ -350,8 +386,12 @@ void UBridgeComponent::HandleTransitionState(const TSharedPtr<FJsonObject>& Json
 
 void UBridgeComponent::HandleFinaleState(const TSharedPtr<FJsonObject>& JsonObj)
 {
-    FString UsdPath = JsonObj->GetStringField(TEXT("usd_path"));
-    FString Message = JsonObj->GetStringField(TEXT("message"));
+    const TSharedPtr<FJsonObject>* FinaleObjPtr;
+    const TSharedPtr<FJsonObject>& FinaleData =
+        JsonObj->TryGetObjectField(TEXT("finale"), FinaleObjPtr) ? *FinaleObjPtr : JsonObj;
+
+    FString UsdPath = FinaleData->GetStringField(TEXT("usd_path"));
+    FString Message = FinaleData->GetStringField(TEXT("message"));
 
     BridgeLog(FString::Printf(TEXT("FINALE: %s"), *Message));
     BridgeLog(FString::Printf(TEXT("USD Path: %s"), *UsdPath));

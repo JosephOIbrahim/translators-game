@@ -1,22 +1,26 @@
 // W_QuestionDisplay.cpp
 // Implementation of main question display widget
+// Programmatic UI - no Blueprint required
 
 #include "W_QuestionDisplay.h"
 #include "W_OptionButton.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
+#include "Components/SizeBox.h"
 #include "Blueprint/WidgetTree.h"
 
 
 UW_QuestionDisplay::UW_QuestionDisplay(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
-    // Default 8-bit colors
-    BackgroundColor = FLinearColor(0.05f, 0.05f, 0.08f, 0.95f);
-    QuestionTextColor = FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
-    ProgressTextColor = FLinearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    // 8-bit color scheme
+    BackgroundColor = FLinearColor(0.02f, 0.02f, 0.05f, 0.95f);
+    QuestionTextColor = FLinearColor(0.36f, 1.0f, 0.86f, 1.0f);  // Cyan
+    ProgressTextColor = FLinearColor(0.5f, 0.5f, 0.6f, 1.0f);
 }
 
 
@@ -24,13 +28,17 @@ void UW_QuestionDisplay::NativeConstruct()
 {
     Super::NativeConstruct();
 
-    // Apply background color
+    // If widgets aren't bound from Blueprint, create them programmatically
+    if (!QuestionText || !OptionsContainer)
+    {
+        BuildWidgetTree();
+    }
+
+    // Apply colors
     if (BackgroundBorder)
     {
         BackgroundBorder->SetBrushColor(BackgroundColor);
     }
-
-    // Apply text colors
     if (QuestionText)
     {
         QuestionText->SetColorAndOpacity(FSlateColor(QuestionTextColor));
@@ -40,7 +48,91 @@ void UW_QuestionDisplay::NativeConstruct()
         ProgressText->SetColorAndOpacity(FSlateColor(ProgressTextColor));
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Constructed"));
+    UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Constructed (Programmatic UI)"));
+}
+
+
+void UW_QuestionDisplay::BuildWidgetTree()
+{
+    // Create root canvas
+    UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
+    WidgetTree->RootWidget = RootCanvas;
+
+    // Create background border - centered panel
+    BackgroundBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BackgroundBorder"));
+    BackgroundBorder->SetBrushColor(BackgroundColor);
+    BackgroundBorder->SetPadding(FMargin(40.0f, 30.0f));
+
+    UCanvasPanelSlot* BorderSlot = RootCanvas->AddChildToCanvas(BackgroundBorder);
+    if (BorderSlot)
+    {
+        // Center the panel
+        BorderSlot->SetAnchors(FAnchors(0.5f, 0.5f, 0.5f, 0.5f));
+        BorderSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+        BorderSlot->SetAutoSize(true);
+    }
+
+    // Create main vertical layout
+    UVerticalBox* MainLayout = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("MainLayout"));
+    BackgroundBorder->AddChild(MainLayout);
+
+    // Create size box to constrain width
+    USizeBox* ContentSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ContentSizeBox"));
+    ContentSizeBox->SetWidthOverride(600.0f);
+    UVerticalBoxSlot* SizeBoxSlot = MainLayout->AddChildToVerticalBox(ContentSizeBox);
+    if (SizeBoxSlot)
+    {
+        SizeBoxSlot->SetHorizontalAlignment(HAlign_Center);
+    }
+
+    // Inner vertical box for content
+    UVerticalBox* ContentBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ContentBox"));
+    ContentSizeBox->AddChild(ContentBox);
+
+    // Progress text (top)
+    ProgressText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ProgressText"));
+    ProgressText->SetText(FText::FromString(TEXT("1 / 8")));
+    ProgressText->SetColorAndOpacity(FSlateColor(ProgressTextColor));
+    ProgressText->SetJustification(ETextJustify::Center);
+
+    FSlateFontInfo ProgressFont = ProgressText->GetFont();
+    ProgressFont.Size = 14;
+    ProgressText->SetFont(ProgressFont);
+
+    UVerticalBoxSlot* ProgressSlot = ContentBox->AddChildToVerticalBox(ProgressText);
+    if (ProgressSlot)
+    {
+        ProgressSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 20.0f));
+        ProgressSlot->SetHorizontalAlignment(HAlign_Center);
+    }
+
+    // Question text (center)
+    QuestionText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("QuestionText"));
+    QuestionText->SetText(FText::FromString(TEXT("Loading question...")));
+    QuestionText->SetColorAndOpacity(FSlateColor(QuestionTextColor));
+    QuestionText->SetJustification(ETextJustify::Center);
+    QuestionText->SetAutoWrapText(true);
+
+    FSlateFontInfo QuestionFont = QuestionText->GetFont();
+    QuestionFont.Size = 24;
+    QuestionText->SetFont(QuestionFont);
+
+    UVerticalBoxSlot* QuestionSlot = ContentBox->AddChildToVerticalBox(QuestionText);
+    if (QuestionSlot)
+    {
+        QuestionSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 30.0f));
+        QuestionSlot->SetHorizontalAlignment(HAlign_Fill);
+    }
+
+    // Options container
+    OptionsContainer = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("OptionsContainer"));
+    UVerticalBoxSlot* OptionsSlot = ContentBox->AddChildToVerticalBox(OptionsContainer);
+    if (OptionsSlot)
+    {
+        OptionsSlot->SetHorizontalAlignment(HAlign_Fill);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Built programmatic widget tree"));
 }
 
 
@@ -52,7 +144,6 @@ void UW_QuestionDisplay::ShowQuestion(const FTranslatorsQuestion& Question)
     // Update question text
     if (QuestionText)
     {
-        // Replace \n with actual newlines
         FString FormattedText = Question.Text.Replace(TEXT("\\n"), TEXT("\n"));
         QuestionText->SetText(FText::FromString(FormattedText));
     }
@@ -80,7 +171,6 @@ void UW_QuestionDisplay::UpdateProgress(int32 Current, int32 Total)
 
 void UW_QuestionDisplay::ClearOptions()
 {
-    // Remove existing option buttons
     for (UW_OptionButton* Button : OptionButtons)
     {
         if (Button)
@@ -96,68 +186,48 @@ void UW_QuestionDisplay::ClearOptions()
 
 void UW_QuestionDisplay::SetDisplayVisible(bool bVisible)
 {
-    if (bVisible)
-    {
-        SetVisibility(ESlateVisibility::Visible);
-        // Could add fade-in animation here
-    }
-    else
-    {
-        SetVisibility(ESlateVisibility::Hidden);
-        // Could add fade-out animation here
-    }
+    SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
 }
 
 
 void UW_QuestionDisplay::CreateOptionButtons()
 {
-    // Clear existing buttons first
     ClearOptions();
 
     if (!OptionsContainer)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[W_QuestionDisplay] No OptionsContainer - cannot create buttons"));
+        UE_LOG(LogTemp, Warning, TEXT("[W_QuestionDisplay] No OptionsContainer"));
         return;
     }
 
-    // Determine button class to use
     TSubclassOf<UW_OptionButton> ButtonClass = OptionButtonClass;
     if (!ButtonClass)
     {
-        // Fallback to base class if no Blueprint class specified
         ButtonClass = UW_OptionButton::StaticClass();
     }
 
-    // Create a button for each option
     const int32 NumOptions = CurrentQuestion.OptionLabels.Num();
     for (int32 i = 0; i < NumOptions; i++)
     {
         UW_OptionButton* NewButton = CreateWidget<UW_OptionButton>(this, ButtonClass);
         if (NewButton)
         {
-            // Set up the option data
             FText Label = FText::FromString(CurrentQuestion.OptionLabels[i]);
             FString Dir = CurrentQuestion.OptionDirections.IsValidIndex(i)
                 ? CurrentQuestion.OptionDirections[i]
                 : TEXT("forward");
 
             NewButton->SetupOption(i, Label, Dir);
-
-            // Bind click event
             NewButton->OnOptionClicked.AddDynamic(this, &UW_QuestionDisplay::HandleOptionClicked);
 
-            // Add to container
-            UVerticalBoxSlot* Slot = OptionsContainer->AddChildToVerticalBox(NewButton);
-            if (Slot)
+            UVerticalBoxSlot* ButtonSlot = OptionsContainer->AddChildToVerticalBox(NewButton);
+            if (ButtonSlot)
             {
-                // Add some padding between buttons
-                Slot->SetPadding(FMargin(0.0f, 5.0f, 0.0f, 5.0f));
+                ButtonSlot->SetPadding(FMargin(0.0f, 8.0f, 0.0f, 8.0f));
+                ButtonSlot->SetHorizontalAlignment(HAlign_Fill);
             }
 
             OptionButtons.Add(NewButton);
-
-            UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Created option button %d: %s"),
-                i, *CurrentQuestion.OptionLabels[i]);
         }
     }
 }
@@ -167,14 +237,11 @@ void UW_QuestionDisplay::HandleOptionClicked(int32 OptionIndex)
 {
     if (SelectedOptionIndex != -1)
     {
-        // Already selected - ignore double clicks
-        UE_LOG(LogTemp, Warning, TEXT("[W_QuestionDisplay] Ignoring click - already answered"));
         return;
     }
 
     SelectedOptionIndex = OptionIndex;
 
-    // Visual feedback - highlight selected, dim others
     for (int32 i = 0; i < OptionButtons.Num(); i++)
     {
         if (OptionButtons[i])
@@ -183,8 +250,6 @@ void UW_QuestionDisplay::HandleOptionClicked(int32 OptionIndex)
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Answer selected: option %d"), OptionIndex);
-
-    // Broadcast to listeners (HUD will handle sending to bridge)
+    UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Answer: option %d"), OptionIndex);
     OnAnswerSelected.Broadcast(OptionIndex);
 }

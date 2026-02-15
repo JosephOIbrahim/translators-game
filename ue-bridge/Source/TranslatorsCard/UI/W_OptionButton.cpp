@@ -1,10 +1,13 @@
 // W_OptionButton.cpp
 // Implementation of clickable answer option button
+// Programmatic UI - no Blueprint required
 
 #include "W_OptionButton.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
+#include "Components/SizeBox.h"
+#include "Blueprint/WidgetTree.h"
 
 
 UW_OptionButton::UW_OptionButton(const FObjectInitializer& ObjectInitializer)
@@ -22,15 +25,18 @@ void UW_OptionButton::NativeConstruct()
 {
     Super::NativeConstruct();
 
+    // If widgets aren't bound from Blueprint, create them programmatically
+    if (!OptionButton || !OptionLabel)
+    {
+        BuildWidgetTree();
+    }
+
     // Bind button events if button exists
     if (OptionButton)
     {
         OptionButton->OnClicked.AddDynamic(this, &UW_OptionButton::HandleButtonClicked);
         OptionButton->OnHovered.AddDynamic(this, &UW_OptionButton::HandleButtonHovered);
         OptionButton->OnUnhovered.AddDynamic(this, &UW_OptionButton::HandleButtonUnhovered);
-
-        // Make focusable for keyboard navigation
-        OptionButton->SetIsFocusable(true);
     }
 
     // Set initial visual state
@@ -42,6 +48,8 @@ void UW_OptionButton::NativeConstruct()
         OptionLabel->SetText(LabelText);
         OptionLabel->SetColorAndOpacity(FSlateColor(TextColor));
     }
+
+    UE_LOG(LogTemp, Log, TEXT("[W_OptionButton] Constructed (Programmatic UI)"));
 }
 
 
@@ -139,4 +147,47 @@ void UW_OptionButton::UpdateVisualState(const FLinearColor& BackgroundColor)
         Style.Pressed.TintColor = FSlateColor(PressedColor);
         OptionButton->SetStyle(Style);
     }
+}
+
+
+void UW_OptionButton::BuildWidgetTree()
+{
+    // Create border as root (for background color)
+    ButtonBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ButtonBorder"));
+    ButtonBorder->SetBrushColor(NormalColor);
+    ButtonBorder->SetPadding(FMargin(20.0f, 12.0f));
+    WidgetTree->RootWidget = ButtonBorder;
+
+    // Create size box to ensure consistent button size
+    USizeBox* ButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ButtonSizeBox"));
+    ButtonSizeBox->SetMinDesiredWidth(400.0f);
+    ButtonSizeBox->SetMinDesiredHeight(50.0f);
+    ButtonBorder->AddChild(ButtonSizeBox);
+
+    // Create the actual button (invisible, just for interaction)
+    OptionButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("OptionButton"));
+
+    // Make button transparent - border handles visuals
+    FButtonStyle TransparentStyle;
+    TransparentStyle.Normal.TintColor = FSlateColor(FLinearColor::Transparent);
+    TransparentStyle.Hovered.TintColor = FSlateColor(FLinearColor::Transparent);
+    TransparentStyle.Pressed.TintColor = FSlateColor(FLinearColor::Transparent);
+    OptionButton->SetStyle(TransparentStyle);
+
+    ButtonSizeBox->AddChild(OptionButton);
+
+    // Create label text
+    OptionLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("OptionLabel"));
+    OptionLabel->SetText(LabelText.IsEmpty() ? FText::FromString(TEXT("Option")) : LabelText);
+    OptionLabel->SetColorAndOpacity(FSlateColor(TextColor));
+    OptionLabel->SetJustification(ETextJustify::Center);
+    OptionLabel->SetAutoWrapText(true);
+
+    FSlateFontInfo LabelFont = OptionLabel->GetFont();
+    LabelFont.Size = 18;
+    OptionLabel->SetFont(LabelFont);
+
+    OptionButton->AddChild(OptionLabel);
+
+    UE_LOG(LogTemp, Log, TEXT("[W_OptionButton] Built programmatic widget tree"));
 }

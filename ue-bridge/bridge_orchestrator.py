@@ -174,24 +174,30 @@ class Colors:
     BOLD = '\033[1m'
 
 def clear_screen():
-    # Use subprocess for screen clearing (static command)
-    subprocess.run(['cmd', '/c', 'cls'], shell=False, check=False)
+    try:
+        import os
+        if sys.stdout.isatty():
+            os.system('cls' if os.name == 'nt' else 'clear')
+        else:
+            print("\n" + "=" * 60 + "\n")
+    except Exception:
+        pass
 
 def print_banner():
     clear_screen()
     print(f"""
-{Colors.CYAN}  ╔═══════════════════════════════════════════════════════════╗
-  ║                                                           ║
-  ║   {Colors.BOLD}THE TRANSLATORS{Colors.RESET}{Colors.CYAN} — Cognitive Profile Orchestrator       ║
-  ║                                                           ║
-  ║   Waiting for UE5 connection...                           ║
-  ║                                                           ║
-  ╚═══════════════════════════════════════════════════════════╝{Colors.RESET}
+{Colors.CYAN}  +-----------------------------------------------------------+
+  |                                                           |
+  |   {Colors.BOLD}THE TRANSLATORS{Colors.RESET}{Colors.CYAN} -- Cognitive Profile Orchestrator       |
+  |                                                           |
+  |   Waiting for UE5 connection...                           |
+  |                                                           |
+  +-----------------------------------------------------------+{Colors.RESET}
 """)
 
 def print_progress(current: int, total: int):
     filled = int((current / total) * 30)
-    bar = "█" * filled + "░" * (30 - filled)
+    bar = "#" * filled + "." * (30 - filled)
     print(f"\n  {Colors.CYAN}Progress: [{bar}] {current}/{total}{Colors.RESET}")
 
 def print_question(q: dict, index: int, total: int):
@@ -271,7 +277,7 @@ def write_question(question: dict, index: int, total: int):
         "bridge_version": BRIDGE_VERSION
     }
 
-    with open(STATE_FILE, 'w') as f:
+    with open(STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(state, f, indent=2)
 
 def wait_for_answer(question: dict = None, timeout: float = 300.0) -> Optional[dict]:
@@ -318,7 +324,7 @@ def wait_for_answer(question: dict = None, timeout: float = 300.0) -> Optional[d
         # JSON fallback
         if ANSWER_FILE.exists():
             try:
-                with open(ANSWER_FILE, 'r') as f:
+                with open(ANSWER_FILE, 'r', encoding='utf-8') as f:
                     answer = json.load(f)
                 # Clear the answer file after reading
                 ANSWER_FILE.unlink()
@@ -358,7 +364,7 @@ def write_transition(direction: str, next_scene: str, progress: float = 0.0, fro
         "bridge_version": BRIDGE_VERSION
     }
 
-    with open(STATE_FILE, 'w') as f:
+    with open(STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(state, f, indent=2)
 
 
@@ -392,7 +398,7 @@ def write_finale(profile_path: str, checksum: str = "", total_answered: int = 8)
         "bridge_version": BRIDGE_VERSION
     }
 
-    with open(STATE_FILE, 'w') as f:
+    with open(STATE_FILE, 'w', encoding='utf-8') as f:
         json.dump(state, f, indent=2)
 
 # ============================================
@@ -544,7 +550,7 @@ def Xform "CognitiveSubstrate" (
 '''
 
     # Write file
-    with open(PROFILE_FILE, 'w') as f:
+    with open(PROFILE_FILE, 'w', encoding='utf-8') as f:
         f.write(usda_content)
 
     return str(PROFILE_FILE), checksum
@@ -606,12 +612,45 @@ def run_questionnaire(force_json: bool = False):
     else:
         initialize_usd_bridge()
 
+    # Write "ready" state so UE5 knows we're here
+    if not USE_USD_MODE:
+        ready_state = {
+            "$schema": "translators-state-v1",
+            "type": "ready",
+            "total_questions": total,
+            "first_scene": QUESTIONS[0]["scene"] if QUESTIONS else "",
+            "timestamp": datetime.now().isoformat(),
+            "bridge_version": BRIDGE_VERSION
+        }
+        with open(STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(ready_state, f, indent=2)
+
     mode_str = "USD" if USE_USD_MODE else "JSON"
-    print(f"\n  {Colors.GREEN}✓{Colors.RESET} Bridge ready at {BRIDGE_DIR}")
+    print(f"\n  {Colors.GREEN}<={Colors.RESET} Bridge ready at {BRIDGE_DIR}")
     print(f"  {Colors.DIM}Mode: {mode_str} | Press Play in UE5 to begin...{Colors.RESET}\n")
 
-    # Wait for UE5 acknowledgment (optional - can start immediately)
-    time.sleep(2)
+    # Wait for UE5 acknowledgment
+    print(f"  Waiting for UE5 acknowledgment...")
+    ack_received = False
+    ack_start = time.time()
+    while time.time() - ack_start < 120:
+        if ANSWER_FILE.exists():
+            try:
+                with open(ANSWER_FILE, 'r', encoding='utf-8') as f:
+                    ack = json.load(f)
+                if ack.get("type") == "ack":
+                    ANSWER_FILE.unlink()
+                    ack_received = True
+                    print(f"  {Colors.GREEN}<={Colors.RESET} UE5 connected! Starting questionnaire...\n")
+                    break
+            except (json.JSONDecodeError, IOError):
+                pass
+        time.sleep(POLL_INTERVAL)
+
+    if not ack_received:
+        print(f"  {Colors.YELLOW}No ack received, starting anyway...{Colors.RESET}\n")
+
+    time.sleep(1)
 
     # Run through questions
     for i, question in enumerate(QUESTIONS):
@@ -651,11 +690,11 @@ def run_questionnaire(force_json: bool = False):
     # Generate and export profile
     clear_screen()
     print(f"""
-{Colors.CYAN}  ╔═══════════════════════════════════════════════════════════╗
-  ║                                                           ║
-  ║   {Colors.BOLD}PROFILE COMPLETE{Colors.RESET}{Colors.CYAN}                                        ║
-  ║                                                           ║
-  ╚═══════════════════════════════════════════════════════════╝{Colors.RESET}
+{Colors.CYAN}  +-----------------------------------------------------------+
+  |                                                           |
+  |   {Colors.BOLD}PROFILE COMPLETE{Colors.RESET}{Colors.CYAN}                                        |
+  |                                                           |
+  +-----------------------------------------------------------+{Colors.RESET}
 """)
 
     profile = generate_profile(answers)
@@ -670,7 +709,7 @@ def run_questionnaire(force_json: bool = False):
     print(f"  {Colors.BOLD}Your Cognitive Dimensions:{Colors.RESET}")
     for dim, value in sorted(profile.get("dimensions", {}).items()):
         bar_len = int(value * 20)
-        bar = "█" * bar_len + "░" * (20 - bar_len)
+        bar = "#" * bar_len + "." * (20 - bar_len)
         print(f"    {dim:24} [{bar}] {value:.1f}")
     print()
 
@@ -754,10 +793,19 @@ def main():
         success = run_questionnaire(force_json=args.json)
         if success:
             print(f"  {Colors.GREEN}Session complete. Your profile is ready for AI consumption.{Colors.RESET}")
-        input("\n  Press Enter to exit...")
+        if sys.stdout.isatty():
+            input("\n  Press Enter to exit...")
+        else:
+            print("\n  Orchestrator finished. Waiting 60s for cleanup...")
+            time.sleep(60)
     except KeyboardInterrupt:
         print(f"\n\n  {Colors.YELLOW}Session cancelled.{Colors.RESET}")
         sys.exit(0)
+    except Exception as e:
+        print(f"\n\n  {Colors.RED}ERROR: {e}{Colors.RESET}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
