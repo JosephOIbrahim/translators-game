@@ -577,7 +577,7 @@ def initialize_usd_bridge():
         )
         validation = validate_bridge_state(BRIDGE_DIR)
         if validation["valid"]:
-            print(f"  {Colors.GREEN}✓{Colors.RESET} USD bridge initialized")
+            print(f"  {Colors.GREEN}[OK]{Colors.RESET} USD bridge initialized")
             USE_USD_MODE = True
             return True
         else:
@@ -700,9 +700,9 @@ def run_questionnaire(force_json: bool = False):
     profile = generate_profile(answers)
     profile_path, checksum = export_usda(profile, answers)
 
-    print(f"  {Colors.GREEN}✓{Colors.RESET} Profile generated (USD Cognitive Substrate v4.3.0)")
-    print(f"  {Colors.GREEN}✓{Colors.RESET} Checksum: {Colors.CYAN}{checksum}{Colors.RESET}")
-    print(f"  {Colors.GREEN}✓{Colors.RESET} Exported: {profile_path}")
+    print(f"  {Colors.GREEN}[OK]{Colors.RESET} Profile generated (USD Cognitive Substrate v4.3.0)")
+    print(f"  {Colors.GREEN}[OK]{Colors.RESET} Checksum: {Colors.CYAN}{checksum}{Colors.RESET}")
+    print(f"  {Colors.GREEN}[OK]{Colors.RESET} Exported: {profile_path}")
     print()
 
     # Your profile - show dimensions
