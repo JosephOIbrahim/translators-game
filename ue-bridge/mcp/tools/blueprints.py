@@ -1,4 +1,11 @@
-"""Blueprint manipulation tools for UE5 MCP server."""
+"""Blueprint and component tools for UE5 MCP server.
+
+Note on UE5.7 Python limitations:
+- Blueprint SCS (SimpleConstructionScript) is NOT exposed to Python in UE5.7.
+- Components can be added to LIVE ACTORS at runtime via new_object + k2_attach_to.
+- Blueprint assets can be created, compiled, and spawned.
+- Blueprint CDO default values can be read/set.
+"""
 
 from __future__ import annotations
 
@@ -44,10 +51,12 @@ else:
     @server.tool(
         name="ue_add_component",
         description=(
-            "Add a component to a Blueprint asset. component_class can be "
-            "'StaticMeshComponent', 'PointLightComponent', 'BoxCollisionComponent', "
-            "'SphereComponent', 'AudioComponent', 'ArrowComponent', "
-            "'SceneComponent', 'SkeletalMeshComponent', 'NiagaraComponent', etc."
+            "Add a component to a LIVE ACTOR in the level (not a Blueprint asset). "
+            "Provide the actor's object path. component_class can be "
+            "'StaticMeshComponent', 'PointLightComponent', 'SpotLightComponent', "
+            "'AudioComponent', 'BoxComponent', 'SphereComponent', "
+            "'SkeletalMeshComponent', 'NiagaraComponent', 'DecalComponent', etc. "
+            "Returns the list of all components on the actor after adding."
         ),
         annotations={
             "readOnlyHint": False,
@@ -56,42 +65,99 @@ else:
         },
     )
     async def add_component(
-        blueprint_path: str,
+        actor_label: str,
         component_class: str,
         component_name: str | None = None,
     ) -> str:
-        """Add a component to a Blueprint. blueprint_path is the asset path (e.g. /Game/Blueprints/BP_MyActor)."""
+        """Add a component to a live actor by label. Uses new_object + k2_attach_to."""
         comp_name = component_name or component_class.replace("Component", "")
         code = f"""
-import unreal
+import unreal, json
 
-bp = unreal.EditorAssetLibrary.load_asset("{blueprint_path}")
-if bp is None:
-    print("RESULT:{{\\"error\\": \\"Blueprint not found: {blueprint_path}\\"}}")
+subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+actors = subsystem.get_all_level_actors()
+actor = None
+for a in actors:
+    if a.get_actor_label() == "{actor_label}":
+        actor = a
+        break
+
+if actor is None:
+    print("RESULT:" + json.dumps({{"error": "Actor not found: {actor_label}"}}))
 else:
-    subsystem = unreal.get_editor_subsystem(unreal.SubobjectDataSubsystem)
-    scs = bp.get_editor_property("simple_construction_script")
-
-    # Create the component via SCS
     comp_class = getattr(unreal, "{component_class}", None)
     if comp_class is None:
-        print("RESULT:{{\\"error\\": \\"Component class not found: {component_class}\\"}}")
+        print("RESULT:" + json.dumps({{"error": "Component class not found: {component_class}"}}))
     else:
-        node = scs.create_node(comp_class, "{comp_name}")
-        if node:
-            # Attach to default scene root
-            root = scs.get_default_scene_root_node()
-            if root and node != root:
-                scs.add_node_to(node, root)
+        comp = unreal.new_object(comp_class, actor, "{comp_name}")
+        if comp and actor.root_component:
+            comp.k2_attach_to(actor.root_component)
 
-            unreal.KismetEditorUtilities.compile_blueprint(bp)
-            unreal.EditorAssetLibrary.save_asset("{blueprint_path}")
-            print("RESULT:" + unreal.JsonObjectLibrary.json_stringify({{"added": "{comp_name}", "class": "{component_class}", "blueprint": "{blueprint_path}"}}))
-        else:
-            # Fallback: try via AddComponent
-            import unreal as ue
-            default_obj = unreal.get_default_object(comp_class)
-            print("RESULT:{{\\"added\\": \\"{comp_name}\\", \\"class\\": \\"{component_class}\\", \\"blueprint\\": \\"{blueprint_path}\\", \\"method\\": \\"scs_create_node\\"}}")
+        comps = actor.get_components_by_class(unreal.ActorComponent)
+        comp_list = [c.get_class().get_name() for c in comps]
+        print("RESULT:" + json.dumps({{
+            "actor": actor.get_actor_label(),
+            "added": "{comp_name}",
+            "class": "{component_class}",
+            "all_components": comp_list
+        }}))
+"""
+        result = await ue.execute_python(code)
+        return json.dumps(result, indent=2)
+
+    @server.tool(
+        name="ue_set_component_property",
+        description=(
+            "Set a property on a component of a live actor. "
+            "Find the component by class name (e.g. 'StaticMeshComponent'). "
+            "For asset references (meshes, materials), pass the content path as a string."
+        ),
+        annotations={
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+        },
+    )
+    async def set_component_property(
+        actor_label: str,
+        component_class: str,
+        property_name: str,
+        value: str,
+    ) -> str:
+        """Set a property on an actor's component. value is JSON (string, number, object, etc.)."""
+        code = f"""
+import unreal, json
+
+subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+actors = subsystem.get_all_level_actors()
+actor = None
+for a in actors:
+    if a.get_actor_label() == "{actor_label}":
+        actor = a
+        break
+
+if actor is None:
+    print("RESULT:" + json.dumps({{"error": "Actor not found: {actor_label}"}}))
+else:
+    comp_class = getattr(unreal, "{component_class}", None)
+    comp = actor.get_component_by_class(comp_class) if comp_class else None
+
+    if comp is None:
+        comps = actor.get_components_by_class(unreal.ActorComponent)
+        available = [c.get_class().get_name() for c in comps]
+        print("RESULT:" + json.dumps({{"error": "Component not found: {component_class}", "available": available}}))
+    else:
+        val = json.loads('''{value}''')
+        # Handle asset path strings
+        if isinstance(val, str) and val.startswith("/"):
+            asset = unreal.EditorAssetLibrary.load_asset(val)
+            if asset:
+                val = asset
+        try:
+            comp.set_editor_property("{property_name}", val)
+            print("RESULT:" + json.dumps({{"set": true, "component": "{component_class}", "property": "{property_name}"}}))
+        except Exception as e:
+            print("RESULT:" + json.dumps({{"error": str(e)}}))
 """
         result = await ue.execute_python(code)
         return json.dumps(result, indent=2)
@@ -119,7 +185,7 @@ import unreal, json
 
 bp = unreal.EditorAssetLibrary.load_asset("{blueprint_path}")
 if bp is None:
-    print("RESULT:{{\\"error\\": \\"Blueprint not found: {blueprint_path}\\"}}")
+    print("RESULT:" + json.dumps({{"error": "Blueprint not found: {blueprint_path}"}}))
 else:
     cdo = unreal.get_default_object(bp.generated_class())
     props = json.loads('''{properties}''')
@@ -131,7 +197,7 @@ else:
         except Exception as e:
             results[key] = str(e)
 
-    unreal.KismetEditorUtilities.compile_blueprint(bp)
+    unreal.BlueprintEditorLibrary.compile_blueprint(bp)
     unreal.EditorAssetLibrary.save_asset("{blueprint_path}")
     print("RESULT:" + json.dumps({{"blueprint": "{blueprint_path}", "properties": results}}))
 """
@@ -150,114 +216,56 @@ else:
     async def compile_blueprint(blueprint_path: str) -> str:
         """Compile and save a Blueprint."""
         code = f"""
-import unreal
+import unreal, json
 
 bp = unreal.EditorAssetLibrary.load_asset("{blueprint_path}")
 if bp is None:
-    print("RESULT:{{\\"error\\": \\"Blueprint not found: {blueprint_path}\\"}}")
+    print("RESULT:" + json.dumps({{"error": "Blueprint not found: {blueprint_path}"}}))
 else:
-    unreal.KismetEditorUtilities.compile_blueprint(bp)
+    unreal.BlueprintEditorLibrary.compile_blueprint(bp)
     unreal.EditorAssetLibrary.save_asset("{blueprint_path}")
-    status = bp.get_editor_property("status")
-    print("RESULT:{{\\"blueprint\\": \\"{blueprint_path}\\", \\"compiled\\": true}}")
+    print("RESULT:" + json.dumps({{"blueprint": "{blueprint_path}", "compiled": True}}))
 """
         result = await ue.execute_python(code)
         return json.dumps(result, indent=2)
 
     @server.tool(
-        name="ue_get_blueprint_components",
-        description="List all components on a Blueprint asset, with their classes and property values.",
+        name="ue_get_actor_components",
+        description="List all components on a live actor in the level, with their classes.",
         annotations={
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
         },
     )
-    async def get_blueprint_components(blueprint_path: str) -> str:
-        """Inspect a Blueprint's component hierarchy."""
+    async def get_actor_components(actor_label: str) -> str:
+        """Inspect an actor's component hierarchy by actor label."""
         code = f"""
 import unreal, json
 
-bp = unreal.EditorAssetLibrary.load_asset("{blueprint_path}")
-if bp is None:
-    print("RESULT:{{\\"error\\": \\"Blueprint not found: {blueprint_path}\\"}}")
+subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+actors = subsystem.get_all_level_actors()
+actor = None
+for a in actors:
+    if a.get_actor_label() == "{actor_label}":
+        actor = a
+        break
+
+if actor is None:
+    print("RESULT:" + json.dumps({{"error": "Actor not found: {actor_label}"}}))
 else:
-    scs = bp.get_editor_property("simple_construction_script")
-    nodes = scs.get_all_nodes() if scs else []
-    components = []
-    for node in nodes:
-        template = node.get_editor_property("component_template")
-        if template:
-            components.append({{
-                "name": node.get_editor_property("internal_variable_name"),
-                "class": template.get_class().get_name(),
-            }})
-
-    parent = bp.get_editor_property("parent_class")
-    parent_name = parent.get_name() if parent else "None"
-
+    comps = actor.get_components_by_class(unreal.ActorComponent)
+    comp_list = []
+    for c in comps:
+        comp_list.append({{
+            "class": c.get_class().get_name(),
+            "name": c.get_name(),
+        }})
     print("RESULT:" + json.dumps({{
-        "blueprint": "{blueprint_path}",
-        "parent_class": parent_name,
-        "components": components
+        "actor": actor.get_actor_label(),
+        "actor_class": actor.get_class().get_name(),
+        "components": comp_list,
     }}))
-"""
-        result = await ue.execute_python(code)
-        return json.dumps(result, indent=2)
-
-    @server.tool(
-        name="ue_set_component_property",
-        description=(
-            "Set a property on a specific component within a Blueprint. "
-            "For example, set StaticMesh on a StaticMeshComponent, or Intensity on a LightComponent."
-        ),
-        annotations={
-            "readOnlyHint": False,
-            "destructiveHint": False,
-            "idempotentHint": True,
-        },
-    )
-    async def set_component_property(
-        blueprint_path: str,
-        component_name: str,
-        property_name: str,
-        value: str,
-    ) -> str:
-        """Set a property on a Blueprint component. value is a JSON string."""
-        code = f"""
-import unreal, json
-
-bp = unreal.EditorAssetLibrary.load_asset("{blueprint_path}")
-if bp is None:
-    print("RESULT:{{\\"error\\": \\"Blueprint not found\\"}}")
-else:
-    scs = bp.get_editor_property("simple_construction_script")
-    nodes = scs.get_all_nodes() if scs else []
-    found = False
-    for node in nodes:
-        var_name = node.get_editor_property("internal_variable_name")
-        if var_name == "{component_name}":
-            template = node.get_editor_property("component_template")
-            if template:
-                val = json.loads('''{value}''')
-                # Handle asset references (strings starting with /)
-                if isinstance(val, str) and val.startswith("/"):
-                    asset = unreal.EditorAssetLibrary.load_asset(val)
-                    if asset:
-                        val = asset
-                try:
-                    template.set_editor_property("{property_name}", val)
-                    found = True
-                    unreal.KismetEditorUtilities.compile_blueprint(bp)
-                    unreal.EditorAssetLibrary.save_asset("{blueprint_path}")
-                    print("RESULT:" + json.dumps({{"component": "{component_name}", "property": "{property_name}", "set": true}}))
-                except Exception as e:
-                    print("RESULT:" + json.dumps({{"error": str(e)}}))
-            break
-
-    if not found:
-        available = [n.get_editor_property("internal_variable_name") for n in nodes]
-        print("RESULT:" + json.dumps({{"error": "Component not found: {component_name}", "available": available}}))
 """
         result = await ue.execute_python(code)
         return json.dumps(result, indent=2)
@@ -284,11 +292,11 @@ else:
         """Spawn a Blueprint actor instance in the level."""
         label_line = f'\n    actor.set_actor_label("{label}")' if label else ""
         code = f"""
-import unreal
+import unreal, json
 
 bp_class = unreal.EditorAssetLibrary.load_blueprint_class("{blueprint_path}")
 if bp_class is None:
-    print("RESULT:{{\\"error\\": \\"Blueprint not found: {blueprint_path}\\"}}")
+    print("RESULT:" + json.dumps({{"error": "Blueprint not found: {blueprint_path}"}}))
 else:
     subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     actor = subsystem.spawn_actor_from_class(
@@ -299,7 +307,7 @@ else:
     if actor:{label_line}
         print("RESULT:" + actor.get_path_name())
     else:
-        print("RESULT:{{\\"error\\": \\"Spawn failed\\"}}")
+        print("RESULT:" + json.dumps({{"error": "Spawn failed"}}))
 """
         result = await ue.execute_python(code)
         return json.dumps(result, indent=2)
