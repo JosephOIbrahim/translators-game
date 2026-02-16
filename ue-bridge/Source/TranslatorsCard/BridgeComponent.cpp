@@ -359,8 +359,11 @@ void UBridgeComponent::HandleQuestionState(const TSharedPtr<FJsonObject>& JsonOb
         }
     }
 
-    BridgeLog(FString::Printf(TEXT("Question %d/%d: %s"),
-        CurrentQuestion.Index + 1, CurrentQuestion.Total, *CurrentQuestion.QuestionId));
+    // Assign depth label based on question index
+    CurrentQuestion.DepthLabel = GetDepthLabelForIndex(CurrentQuestion.Index);
+
+    BridgeLog(FString::Printf(TEXT("Question %d/%d [%s]: %s"),
+        CurrentQuestion.Index + 1, CurrentQuestion.Total, *CurrentQuestion.DepthLabel, *CurrentQuestion.QuestionId));
 
     // Broadcast raw JSON for flexible handling
     OnQuestionReceived.Broadcast(CurrentStateJson);
@@ -673,8 +676,11 @@ void UBridgeComponent::HandleUsdaQuestionState(const FString& Content)
         }
     }
 
-    BridgeLog(FString::Printf(TEXT("USD Question %d/%d: %s"),
-        CurrentQuestion.Index + 1, CurrentQuestion.Total, *CurrentQuestion.QuestionId));
+    // Assign depth label based on question index
+    CurrentQuestion.DepthLabel = GetDepthLabelForIndex(CurrentQuestion.Index);
+
+    BridgeLog(FString::Printf(TEXT("USD Question %d/%d [%s]: %s"),
+        CurrentQuestion.Index + 1, CurrentQuestion.Total, *CurrentQuestion.DepthLabel, *CurrentQuestion.QuestionId));
 
     // Build JSON for backward-compatible delegate
     CurrentStateJson = BuildQuestionJson();
@@ -1030,4 +1036,206 @@ void UBridgeComponent::SendAcknowledgeUsda()
         BridgeLog(TEXT("USD ack failed, sending JSON"));
         SendAcknowledge();
     }
+}
+
+
+// === DEPTH LABELS ===
+
+FString UBridgeComponent::GetDepthLabelForIndex(int32 Index)
+{
+    // Q1-Q2: SURFACE, Q3-Q4: PATTERNS, Q5-Q6: FEELINGS, Q7-Q8: CORE
+    switch (Index / 2)
+    {
+    case 0: return TEXT("SURFACE");
+    case 1: return TEXT("PATTERNS");
+    case 2: return TEXT("FEELINGS");
+    case 3: return TEXT("CORE");
+    default: return TEXT("CORE");
+    }
+}
+
+
+// === COGNITIVE PROFILE PARSING ===
+
+FTranslatorsProfile UBridgeComponent::ParseCognitiveProfile(const FString& UsdPath)
+{
+    FTranslatorsProfile Profile;
+
+    FString Content;
+    if (!FFileHelper::LoadFileToString(Content, *UsdPath))
+    {
+        BridgeLog(FString::Printf(TEXT("Could not read profile: %s"), *UsdPath));
+        return Profile;
+    }
+
+    BridgeLog(FString::Printf(TEXT("Parsing cognitive profile from: %s"), *UsdPath));
+
+    // Parse checksum
+    {
+        FRegexPattern Pattern(TEXT("string checksum = \"([^\"]*)\""));
+        FRegexMatcher Matcher(Pattern, Content);
+        if (Matcher.FindNext())
+        {
+            Profile.Checksum = Matcher.GetCaptureGroup(1);
+        }
+    }
+
+    // Parse anchor
+    {
+        FRegexPattern Pattern(TEXT("string anchor = \"([^\"]*)\""));
+        FRegexMatcher Matcher(Pattern, Content);
+        if (Matcher.FindNext())
+        {
+            Profile.Anchor = Matcher.GetCaptureGroup(1);
+        }
+    }
+
+    // Parse anchor from customData
+    {
+        FRegexPattern Pattern(TEXT("string translators_anchor = \"([^\"]*)\""));
+        FRegexMatcher Matcher(Pattern, Content);
+        if (Matcher.FindNext())
+        {
+            Profile.Anchor = Matcher.GetCaptureGroup(1);
+        }
+    }
+
+    // Parse Profile dimensions (float cognitive_density = 0.5)
+    // and Traits labels (string load = "adaptive")
+    // Combine them into FTranslatorsTrait entries
+    TMap<FString, float> DimensionScores;
+    TMap<FString, FString> TraitLabels;
+
+    // Extract Profile section: float <name> = <value>
+    {
+        int32 ProfileStart = Content.Find(TEXT("def Xform \"Profile\""));
+        if (ProfileStart != INDEX_NONE)
+        {
+            int32 BlockStart = Content.Find(TEXT("{"), ESearchCase::CaseSensitive, ESearchDir::FromStart, ProfileStart);
+            if (BlockStart != INDEX_NONE)
+            {
+                int32 BraceDepth = 1;
+                int32 BlockEnd = BlockStart + 1;
+                while (BlockEnd < Content.Len() && BraceDepth > 0)
+                {
+                    if (Content[BlockEnd] == TEXT('{')) BraceDepth++;
+                    else if (Content[BlockEnd] == TEXT('}')) BraceDepth--;
+                    BlockEnd++;
+                }
+
+                FString ProfileBlock = Content.Mid(BlockStart, BlockEnd - BlockStart);
+                FRegexPattern Pattern(TEXT("float (\\w+) = ([\\d.]+)"));
+                FRegexMatcher Matcher(Pattern, ProfileBlock);
+                while (Matcher.FindNext())
+                {
+                    FString Name = Matcher.GetCaptureGroup(1);
+                    float Value = FCString::Atof(*Matcher.GetCaptureGroup(2));
+                    DimensionScores.Add(Name, Value);
+                }
+            }
+        }
+    }
+
+    // Extract Traits section: string <question_id> = "<trait_label>"
+    // These are inside def Xform "Traits" { ... }
+    {
+        // Find the Traits block
+        int32 TraitsStart = Content.Find(TEXT("def Xform \"Traits\""));
+        if (TraitsStart != INDEX_NONE)
+        {
+            // Find the closing brace for this block
+            int32 BlockStart = Content.Find(TEXT("{"), ESearchCase::CaseSensitive, ESearchDir::FromStart, TraitsStart);
+            if (BlockStart != INDEX_NONE)
+            {
+                int32 BraceDepth = 1;
+                int32 BlockEnd = BlockStart + 1;
+                while (BlockEnd < Content.Len() && BraceDepth > 0)
+                {
+                    if (Content[BlockEnd] == TEXT('{')) BraceDepth++;
+                    else if (Content[BlockEnd] == TEXT('}')) BraceDepth--;
+                    BlockEnd++;
+                }
+
+                FString TraitsBlock = Content.Mid(BlockStart, BlockEnd - BlockStart);
+                FRegexPattern Pattern(TEXT("string (\\w+) = \"([^\"]*)\""));
+                FRegexMatcher Matcher(Pattern, TraitsBlock);
+                while (Matcher.FindNext())
+                {
+                    TraitLabels.Add(Matcher.GetCaptureGroup(1), Matcher.GetCaptureGroup(2));
+                }
+            }
+        }
+    }
+
+    // Map between question IDs and dimension names
+    // Question IDs: load, pace, uncertainty, feedback, recovery, starting, completion, essence
+    // Dimension names: cognitive_density, processing_pace, uncertainty_tolerance, feedback_style,
+    //                  home_altitude, guidance_frequency, default_paradigm, tangent_tolerance
+    TMap<FString, FString> QuestionToDimension;
+    QuestionToDimension.Add(TEXT("load"), TEXT("cognitive_density"));
+    QuestionToDimension.Add(TEXT("pace"), TEXT("processing_pace"));
+    QuestionToDimension.Add(TEXT("uncertainty"), TEXT("uncertainty_tolerance"));
+    QuestionToDimension.Add(TEXT("feedback"), TEXT("feedback_style"));
+    QuestionToDimension.Add(TEXT("recovery"), TEXT("home_altitude"));
+    QuestionToDimension.Add(TEXT("starting"), TEXT("guidance_frequency"));
+    QuestionToDimension.Add(TEXT("completion"), TEXT("default_paradigm"));
+    QuestionToDimension.Add(TEXT("essence"), TEXT("tangent_tolerance"));
+
+    // Build traits from combined data
+    for (const auto& Pair : TraitLabels)
+    {
+        FTranslatorsTrait Trait;
+        Trait.Label = Pair.Value;
+
+        // Find matching dimension
+        FString* DimName = QuestionToDimension.Find(Pair.Key);
+        if (DimName)
+        {
+            Trait.Dimension = *DimName;
+            float* Score = DimensionScores.Find(*DimName);
+            Trait.Score = Score ? *Score : 0.5f;
+        }
+        else
+        {
+            Trait.Dimension = Pair.Key;
+            Trait.Score = 0.5f;
+        }
+
+        // Generate behavior description from score
+        if (Trait.Score >= 0.7f)
+        {
+            Trait.Behavior = FString::Printf(TEXT("Strong %s tendency"), *Trait.Label);
+        }
+        else if (Trait.Score <= 0.3f)
+        {
+            Trait.Behavior = FString::Printf(TEXT("Measured %s approach"), *Trait.Label);
+        }
+        else
+        {
+            Trait.Behavior = FString::Printf(TEXT("Balanced %s style"), *Trait.Label);
+        }
+
+        Profile.Traits.Add(Trait);
+    }
+
+    // Generate insights from the profile data
+    // (The USDA doesn't contain explicit insights, so derive them from scores)
+    for (const FTranslatorsTrait& Trait : Profile.Traits)
+    {
+        if (Trait.Score >= 0.7f)
+        {
+            Profile.Insights.Add(FString::Printf(TEXT("High %s (%s) suggests strong preference in this dimension"),
+                *Trait.Dimension.Replace(TEXT("_"), TEXT(" ")), *Trait.Label));
+        }
+        else if (Trait.Score <= 0.3f)
+        {
+            Profile.Insights.Add(FString::Printf(TEXT("Low %s (%s) indicates a focused approach here"),
+                *Trait.Dimension.Replace(TEXT("_"), TEXT(" ")), *Trait.Label));
+        }
+    }
+
+    BridgeLog(FString::Printf(TEXT("Parsed profile: %d traits, %d insights, checksum=%s"),
+        Profile.Traits.Num(), Profile.Insights.Num(), *Profile.Checksum));
+
+    return Profile;
 }

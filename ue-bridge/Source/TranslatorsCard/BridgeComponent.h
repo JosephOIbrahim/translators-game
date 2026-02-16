@@ -66,6 +66,52 @@ struct FTranslatorsQuestion
 
     UPROPERTY(BlueprintReadOnly)
     TArray<FString> OptionDirections;
+
+    /** Depth tier label: SURFACE, PATTERNS, FEELINGS, CORE */
+    UPROPERTY(BlueprintReadOnly)
+    FString DepthLabel;
+};
+
+
+// Cognitive profile trait (from profile USDA)
+USTRUCT(BlueprintType)
+struct FTranslatorsTrait
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    FString Dimension;    // e.g. "cognitive_density"
+
+    UPROPERTY(BlueprintReadOnly)
+    FString Label;        // e.g. "Balanced"
+
+    UPROPERTY(BlueprintReadOnly)
+    float Score = 0.0f;   // 0.0 - 1.0
+
+    UPROPERTY(BlueprintReadOnly)
+    FString Behavior;     // e.g. "You can hold moderate complexity"
+};
+
+
+// Full cognitive profile result
+USTRUCT(BlueprintType)
+struct FTranslatorsProfile
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FTranslatorsTrait> Traits;
+
+    UPROPERTY(BlueprintReadOnly)
+    TArray<FString> Insights;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString Checksum;
+
+    UPROPERTY(BlueprintReadOnly)
+    FString Anchor;
+
+    bool IsValid() const { return Traits.Num() > 0; }
 };
 
 
@@ -120,6 +166,10 @@ public:
     /** Force reload the USD stage (use if auto-detection fails) */
     UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
     void ForceReloadUsdStage();
+
+    /** Parse cognitive profile from exported USDA file */
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    FTranslatorsProfile ParseCognitiveProfile(const FString& UsdPath);
 
     /** Check if bridge is connected */
     UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
@@ -189,6 +239,9 @@ private:
     void ReloadUsdStage();
 
     // === UTILITY ===
+
+    /** Assign depth label based on question index (0-based) */
+    static FString GetDepthLabelForIndex(int32 Index);
 
     void WriteJsonToFile(const FString& Filename, const TSharedPtr<FJsonObject>& JsonObj);
     FString GetBridgeFilePath(const FString& Filename) const;

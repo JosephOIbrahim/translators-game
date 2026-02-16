@@ -8,6 +8,7 @@
 #include "Components/Border.h"
 #include "Components/SizeBox.h"
 #include "Blueprint/WidgetTree.h"
+#include "Misc/Paths.h"
 
 
 UW_OptionButton::UW_OptionButton(const FObjectInitializer& ObjectInitializer)
@@ -21,15 +22,19 @@ UW_OptionButton::UW_OptionButton(const FObjectInitializer& ObjectInitializer)
 }
 
 
-void UW_OptionButton::NativeConstruct()
+TSharedRef<SWidget> UW_OptionButton::RebuildWidget()
 {
-    Super::NativeConstruct();
-
-    // If widgets aren't bound from Blueprint, create them programmatically
     if (!OptionButton || !OptionLabel)
     {
         BuildWidgetTree();
     }
+    return Super::RebuildWidget();
+}
+
+
+void UW_OptionButton::NativeConstruct()
+{
+    Super::NativeConstruct();
 
     // Bind button events if button exists
     if (OptionButton)
@@ -183,9 +188,7 @@ void UW_OptionButton::BuildWidgetTree()
     OptionLabel->SetJustification(ETextJustify::Center);
     OptionLabel->SetAutoWrapText(true);
 
-    FSlateFontInfo LabelFont = OptionLabel->GetFont();
-    LabelFont.Size = 18;
-    OptionLabel->SetFont(LabelFont);
+    OptionLabel->SetFont(FSlateFontInfo(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), 18));
 
     OptionButton->AddChild(OptionLabel);
 

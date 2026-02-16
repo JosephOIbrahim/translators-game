@@ -1,6 +1,6 @@
 // TranslatorsHUD.h
 // Main HUD class connecting BridgeComponent to UI widgets
-// Part of The Translators Card - Claude Code → UE5.7 Bridge
+// Part of The Translators Card - Claude Code -> UE5.7 Bridge
 
 #pragma once
 
@@ -11,11 +11,15 @@
 
 // Forward declarations
 class UW_QuestionDisplay;
+class UW_TitleScreen;
+class UW_FinaleScreen;
 class UW_ProgressIndicator;
 class UUserWidget;
 
 /**
  * ATranslatorsHUD - Main game HUD
+ *
+ * Manages the full game flow: Title -> Connecting -> Questions -> Finale
  *
  * Responsibilities:
  * 1. Find and connect to BridgeComponent
@@ -23,11 +27,7 @@ class UUserWidget;
  * 3. Handle BridgeComponent events
  * 4. Track response timing
  * 5. Send answers back to bridge
- *
- * ThinkingMachines Compliance:
- * - FIXED event binding order
- * - Deterministic widget creation
- * - Consistent state machine flow
+ * 6. Parse and display cognitive profile on finale
  */
 UCLASS()
 class TRANSLATORSCARD_API ATranslatorsHUD : public AHUD
@@ -50,6 +50,10 @@ public:
     /** Widget class for finale screen */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Translators|Config")
     TSubclassOf<UUserWidget> FinaleWidgetClass;
+
+    /** Widget class for title screen */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Translators|Config")
+    TSubclassOf<UUserWidget> TitleWidgetClass;
 
     // === STATE ===
 
@@ -96,6 +100,10 @@ protected:
     UFUNCTION()
     void OnAnswerSelected(int32 OptionIndex);
 
+    /** Called when user presses Enter on title screen */
+    UFUNCTION()
+    void OnTitleStartRequested();
+
     // === WIDGETS ===
 
     UPROPERTY()
@@ -107,12 +115,30 @@ protected:
     UPROPERTY()
     UUserWidget* FinaleWidget;
 
+    UPROPERTY()
+    UW_TitleScreen* TitleWidget;
+
 private:
+    /** High-level game screen states */
+    enum class EHUDState : uint8
+    {
+        Title,       // Title screen - waiting for Enter
+        Connecting,  // Waiting for bridge connection
+        Questions,   // Answering questions
+        Finale       // Profile results
+    };
+
     /** Find BridgeComponent in the world */
     UBridgeComponent* FindBridgeComponent();
 
     /** Create UI widgets */
     void CreateWidgets();
+
+    /** Transition to a new HUD state */
+    void SetHUDState(EHUDState NewState);
+
+    /** Show title screen */
+    void ShowTitleScreen();
 
     /** Show connecting message */
     void ShowConnectingScreen();
@@ -132,6 +158,9 @@ private:
 
     /** Handle keyboard input for option selection */
     void HandleKeyInput();
+
+    /** Current HUD state */
+    EHUDState CurrentHUDState = EHUDState::Title;
 
     /** Time when current question was shown */
     float QuestionStartTime = 0.0f;

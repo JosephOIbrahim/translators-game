@@ -82,6 +82,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Translators|Option")
     void SimulateClick();
 
+    virtual TSharedRef<SWidget> RebuildWidget() override;
+
 protected:
     virtual void NativeConstruct() override;
     virtual void NativeDestruct() override;

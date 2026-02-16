@@ -66,6 +66,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators|Style")
     FLinearColor ProgressTextColor = FLinearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators|Style")
+    FLinearColor DepthLabelColor = FLinearColor(0.5f, 0.8f, 0.5f, 1.0f);  // Default sage green
+
     // === FUNCTIONS ===
 
     /** Display a new question */
@@ -88,6 +91,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Translators|State")
     int32 GetSelectedOptionIndex() const { return SelectedOptionIndex; }
 
+    virtual TSharedRef<SWidget> RebuildWidget() override;
+
 protected:
     virtual void NativeConstruct() override;
 
@@ -97,6 +102,9 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget, OptionalWidget = true))
     UTextBlock* ProgressText;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget, OptionalWidget = true))
+    UTextBlock* DepthText;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget, OptionalWidget = true))
     UVerticalBox* OptionsContainer;

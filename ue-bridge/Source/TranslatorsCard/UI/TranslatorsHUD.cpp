@@ -1,5 +1,5 @@
 // TranslatorsHUD.cpp
-// Implementation of main game HUD with polished transitions
+// Implementation of main game HUD with title screen and profile display
 // Programmatic UI - no Blueprint required
 
 #include "TranslatorsHUD.h"
@@ -7,6 +7,7 @@
 #include "W_ProgressIndicator.h"
 #include "W_ConnectingScreen.h"
 #include "W_FinaleScreen.h"
+#include "W_TitleScreen.h"
 #include "../BridgeComponent.h"
 #include "Blueprint/UserWidget.h"
 #include "Kismet/GameplayStatics.h"
@@ -22,6 +23,7 @@ ATranslatorsHUD::ATranslatorsHUD()
     bIsBridgeConnected = false;
     bIsComplete = false;
     TotalQuestions = 8;
+    CurrentHUDState = EHUDState::Title;
 }
 
 
@@ -51,31 +53,8 @@ void ATranslatorsHUD::BeginPlay()
     // Create UI widgets
     CreateWidgets();
 
-    // Show connecting screen initially
-    ShowConnectingScreen();
-
-    // Check if bridge already processed state before we subscribed
-    if (BridgeComponent)
-    {
-        if (BridgeComponent->IsBridgeConnected())
-        {
-            OnBridgeReady(TotalQuestions);
-        }
-
-        FTranslatorsQuestion Q = BridgeComponent->GetCurrentQuestion();
-        if (!Q.QuestionId.IsEmpty())
-        {
-            UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Catching up - bridge already has question: %s"), *Q.QuestionId);
-            CurrentQuestion = Q;
-            QuestionStartTime = GetWorld()->GetTimeSeconds();
-            if (QuestionWidget)
-            {
-                QuestionWidget->ShowQuestion(CurrentQuestion);
-                QuestionWidget->SetRenderOpacity(1.0f);
-            }
-            ShowQuestionScreen();
-        }
-    }
+    // Start on title screen
+    SetHUDState(EHUDState::Title);
 }
 
 
@@ -101,6 +80,11 @@ void ATranslatorsHUD::EndPlay(const EEndPlayReason::Type EndPlayReason)
     if (FinaleWidget)
     {
         FinaleWidget->RemoveFromParent();
+    }
+    if (TitleWidget)
+    {
+        TitleWidget->OnStartRequested.RemoveAll(this);
+        TitleWidget->RemoveFromParent();
     }
 
     Super::EndPlay(EndPlayReason);
@@ -152,6 +136,22 @@ void ATranslatorsHUD::CreateWidgets()
         return;
     }
 
+    // Create title screen widget (z-order 40 - on top of everything)
+    if (TitleWidgetClass)
+    {
+        TitleWidget = CreateWidget<UW_TitleScreen>(PC, TitleWidgetClass);
+    }
+    else
+    {
+        TitleWidget = CreateWidget<UW_TitleScreen>(PC, UW_TitleScreen::StaticClass());
+    }
+    if (TitleWidget)
+    {
+        TitleWidget->AddToViewport(40);
+        TitleWidget->OnStartRequested.AddDynamic(this, &ATranslatorsHUD::OnTitleStartRequested);
+        UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Created TitleWidget"));
+    }
+
     // Create question display widget
     if (QuestionDisplayClass)
     {
@@ -182,6 +182,7 @@ void ATranslatorsHUD::CreateWidgets()
     if (ConnectingWidget)
     {
         ConnectingWidget->AddToViewport(20);
+        ConnectingWidget->SetVisibility(ESlateVisibility::Hidden);
         UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Created ConnectingWidget"));
     }
 
@@ -204,8 +205,69 @@ void ATranslatorsHUD::CreateWidgets()
 }
 
 
+// === STATE MANAGEMENT ===
+
+void ATranslatorsHUD::SetHUDState(EHUDState NewState)
+{
+    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] State transition: %d -> %d"), (uint8)CurrentHUDState, (uint8)NewState);
+    CurrentHUDState = NewState;
+
+    switch (NewState)
+    {
+    case EHUDState::Title:
+        ShowTitleScreen();
+        break;
+    case EHUDState::Connecting:
+        ShowConnectingScreen();
+        break;
+    case EHUDState::Questions:
+        ShowQuestionScreen();
+        break;
+    case EHUDState::Finale:
+        // ShowFinaleScreen is called directly with message
+        break;
+    }
+}
+
+
+void ATranslatorsHUD::ShowTitleScreen()
+{
+    if (TitleWidget)
+    {
+        TitleWidget->SetVisibility(ESlateVisibility::Visible);
+        TitleWidget->SetRenderOpacity(1.0f);
+    }
+    if (ConnectingWidget)
+    {
+        ConnectingWidget->SetVisibility(ESlateVisibility::Hidden);
+    }
+    if (QuestionWidget)
+    {
+        QuestionWidget->SetVisibility(ESlateVisibility::Hidden);
+    }
+    if (FinaleWidget)
+    {
+        FinaleWidget->SetVisibility(ESlateVisibility::Hidden);
+    }
+
+    // Use GameAndUI input mode so PC->WasInputKeyJustPressed works for Enter detection
+    APlayerController* PC = GetOwningPlayerController();
+    if (PC)
+    {
+        FInputModeGameAndUI InputMode;
+        InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+        PC->SetInputMode(InputMode);
+        PC->bShowMouseCursor = false;
+    }
+}
+
+
 void ATranslatorsHUD::ShowConnectingScreen()
 {
+    if (TitleWidget)
+    {
+        TitleWidget->SetVisibility(ESlateVisibility::Hidden);
+    }
     if (ConnectingWidget)
     {
         ConnectingWidget->SetVisibility(ESlateVisibility::Visible);
@@ -224,6 +286,10 @@ void ATranslatorsHUD::ShowConnectingScreen()
 
 void ATranslatorsHUD::ShowQuestionScreen()
 {
+    if (TitleWidget)
+    {
+        TitleWidget->SetVisibility(ESlateVisibility::Hidden);
+    }
     if (ConnectingWidget)
     {
         ConnectingWidget->SetVisibility(ESlateVisibility::Hidden);
@@ -252,7 +318,12 @@ void ATranslatorsHUD::ShowQuestionScreen()
 void ATranslatorsHUD::ShowFinaleScreen(const FString& Message)
 {
     TransitionState = EHUDTransition::None;
+    CurrentHUDState = EHUDState::Finale;
 
+    if (TitleWidget)
+    {
+        TitleWidget->SetVisibility(ESlateVisibility::Hidden);
+    }
     if (ConnectingWidget)
     {
         ConnectingWidget->SetVisibility(ESlateVisibility::Hidden);
@@ -281,6 +352,19 @@ void ATranslatorsHUD::SendAcknowledgment()
 
 // === EVENT HANDLERS ===
 
+void ATranslatorsHUD::OnTitleStartRequested()
+{
+    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Title -> Connecting"));
+    SetHUDState(EHUDState::Connecting);
+
+    // If bridge is already connected (orchestrator started before Enter was pressed)
+    if (BridgeComponent && BridgeComponent->IsBridgeConnected())
+    {
+        OnBridgeReady(TotalQuestions);
+    }
+}
+
+
 void ATranslatorsHUD::OnBridgeReady(int32 InTotalQuestions)
 {
     UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Bridge ready! Total questions: %d"), InTotalQuestions);
@@ -289,6 +373,25 @@ void ATranslatorsHUD::OnBridgeReady(int32 InTotalQuestions)
     TotalQuestions = InTotalQuestions;
 
     SendAcknowledgment();
+
+    // If still on title, don't auto-transition (wait for Enter)
+    // If on connecting, check for existing question
+    if (CurrentHUDState == EHUDState::Connecting)
+    {
+        FTranslatorsQuestion Q = BridgeComponent->GetCurrentQuestion();
+        if (!Q.QuestionId.IsEmpty())
+        {
+            UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Catching up - bridge already has question: %s"), *Q.QuestionId);
+            CurrentQuestion = Q;
+            QuestionStartTime = GetWorld()->GetTimeSeconds();
+            if (QuestionWidget)
+            {
+                QuestionWidget->ShowQuestion(CurrentQuestion);
+                QuestionWidget->SetRenderOpacity(1.0f);
+            }
+            SetHUDState(EHUDState::Questions);
+        }
+    }
 }
 
 
@@ -310,8 +413,17 @@ void ATranslatorsHUD::OnQuestionReceived(const FString& QuestionJson)
         QuestionWidget->ShowQuestion(CurrentQuestion);
     }
 
+    // If we're still on connecting/title, transition to questions
+    if (CurrentHUDState == EHUDState::Connecting || CurrentHUDState == EHUDState::Title)
+    {
+        if (QuestionWidget)
+        {
+            QuestionWidget->SetRenderOpacity(1.0f);
+        }
+        SetHUDState(EHUDState::Questions);
+    }
     // If we're waiting for next question (mid-transition), start fade-in
-    if (TransitionState == EHUDTransition::WaitForNext)
+    else if (TransitionState == EHUDTransition::WaitForNext)
     {
         TransitionState = EHUDTransition::FadeIn;
         TransitionTimer = 0.0f;
@@ -323,7 +435,7 @@ void ATranslatorsHUD::OnQuestionReceived(const FString& QuestionJson)
     }
     else
     {
-        // First question or catch-up: show immediately
+        // Already in questions state, show immediately
         ShowQuestionScreen();
         if (QuestionWidget)
         {
@@ -335,11 +447,14 @@ void ATranslatorsHUD::OnQuestionReceived(const FString& QuestionJson)
     if (GEngine)
     {
         GEngine->AddOnScreenDebugMessage(1, 15.0f, FColor::Green,
-            FString::Printf(TEXT("Q%d/%d: %s"), CurrentQuestion.Index + 1, CurrentQuestion.Total, *CurrentQuestion.QuestionId));
+            FString::Printf(TEXT("Q%d/%d [%s]: %s"),
+                CurrentQuestion.Index + 1, CurrentQuestion.Total,
+                *CurrentQuestion.DepthLabel, *CurrentQuestion.QuestionId));
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Displaying question %d/%d: %s"),
-        CurrentQuestion.Index + 1, CurrentQuestion.Total, *CurrentQuestion.QuestionId);
+    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Displaying question %d/%d [%s]: %s"),
+        CurrentQuestion.Index + 1, CurrentQuestion.Total,
+        *CurrentQuestion.DepthLabel, *CurrentQuestion.QuestionId);
 }
 
 
@@ -347,7 +462,6 @@ void ATranslatorsHUD::OnTransitionReceived(const FString& Direction, const FStri
 {
     UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Transition: %s -> %s"), *Direction, *NextScene);
 
-    // Debug overlay for transition
     if (GEngine)
     {
         GEngine->AddOnScreenDebugMessage(2, 3.0f, FColor::Cyan,
@@ -366,70 +480,43 @@ void ATranslatorsHUD::OnFinaleReceived(const FString& UsdPath)
     if (FinaleScreen)
     {
         FinaleScreen->SetUsdPath(UsdPath);
+
+        // Parse and display the cognitive profile
+        if (BridgeComponent)
+        {
+            FTranslatorsProfile Profile = BridgeComponent->ParseCognitiveProfile(UsdPath);
+            if (Profile.IsValid())
+            {
+                FinaleScreen->DisplayProfile(Profile);
+            }
+        }
     }
 
     ShowFinaleScreen(TEXT("Your cognitive profile is complete."));
 }
 
 
-// === HUD CANVAS DRAWING (bypasses UMG) ===
+// === HUD CANVAS DRAWING (bypasses UMG - fallback overlay) ===
 
 void ATranslatorsHUD::DrawHUD()
 {
     Super::DrawHUD();
 
-    if (bIsComplete)
+    // The UMG widgets handle the primary UI. This DrawHUD provides
+    // a minimal fallback overlay for debugging.
+
+    if (!Canvas)
     {
-        // Draw finale
-        DrawText(TEXT("PROFILE COMPLETE"), FColor::Cyan, 100, 100, nullptr, 2.0f);
-        DrawText(TEXT("Your cognitive profile has been generated."), FColor::White, 100, 140);
         return;
     }
 
-    if (CurrentQuestion.QuestionId.IsEmpty())
+    // Only draw debug info if in question state
+    if (CurrentHUDState == EHUDState::Questions && !CurrentQuestion.QuestionId.IsEmpty())
     {
-        // No question yet - show connecting
-        DrawText(TEXT("Connecting to Claude Code..."), FColor(128, 128, 153), Canvas->SizeX / 2 - 150, Canvas->SizeY / 2, nullptr, 1.5f);
-        return;
-    }
-
-    // Draw question on canvas
-    float CenterX = Canvas->SizeX / 2.0f;
-    float StartY = Canvas->SizeY * 0.2f;
-
-    // Progress
-    FString ProgressStr = FString::Printf(TEXT("%d / %d"), CurrentQuestion.Index + 1, CurrentQuestion.Total);
-    DrawText(ProgressStr, FColor(128, 128, 153), CenterX - 30, StartY, nullptr, 1.2f);
-
-    // Question text
-    FString FormattedText = CurrentQuestion.Text.Replace(TEXT("\\n"), TEXT(" "));
-    DrawText(FormattedText, FColor(92, 255, 219), CenterX - 250, StartY + 50, nullptr, 1.5f);
-
-    // Options
-    float OptionY = StartY + 130;
-    for (int32 i = 0; i < CurrentQuestion.OptionLabels.Num(); i++)
-    {
-        FString OptionStr = FString::Printf(TEXT("[%d]  %s"), i + 1, *CurrentQuestion.OptionLabels[i]);
-
-        // Highlight selected option
-        FColor OptionColor = FColor(230, 230, 230);
-        if (PendingAnswerIndex == i)
-        {
-            OptionColor = FColor(92, 255, 219);  // Cyan highlight
-        }
-
-        DrawText(OptionStr, OptionColor, CenterX - 200, OptionY, nullptr, 1.3f);
-        OptionY += 50;
-    }
-
-    // Instructions
-    if (TransitionState == EHUDTransition::None && PendingAnswerIndex < 0)
-    {
-        DrawText(TEXT("Press 1, 2, or 3 to answer"), FColor(100, 100, 120), CenterX - 120, OptionY + 30);
-    }
-    else if (TransitionState == EHUDTransition::AnswerHold)
-    {
-        DrawText(TEXT("..."), FColor(92, 255, 219), CenterX - 10, OptionY + 30, nullptr, 1.5f);
+        // Small debug text in top-left
+        FString DebugStr = FString::Printf(TEXT("Q%d/%d [%s]"),
+            CurrentQuestion.Index + 1, CurrentQuestion.Total, *CurrentQuestion.DepthLabel);
+        DrawText(DebugStr, FColor(80, 80, 100), 10, 10);
     }
 }
 
@@ -457,7 +544,6 @@ void ATranslatorsHUD::UpdateTransition(float DeltaSeconds)
     {
     case EHUDTransition::AnswerHold:
     {
-        // Hold the selected answer visible for a moment
         if (TransitionTimer >= ANSWER_HOLD_TIME)
         {
             // Now send the answer to bridge
@@ -469,7 +555,6 @@ void ATranslatorsHUD::UpdateTransition(float DeltaSeconds)
                 PendingAnswerIndex = -1;
             }
 
-            // Start fade out
             TransitionState = EHUDTransition::FadeOut;
             TransitionTimer = 0.0f;
         }
@@ -486,7 +571,6 @@ void ATranslatorsHUD::UpdateTransition(float DeltaSeconds)
 
         if (TransitionTimer >= FADE_DURATION)
         {
-            // Fully faded out - wait for next question
             if (QuestionWidget)
             {
                 QuestionWidget->SetRenderOpacity(0.0f);
@@ -499,8 +583,7 @@ void ATranslatorsHUD::UpdateTransition(float DeltaSeconds)
 
     case EHUDTransition::WaitForNext:
     {
-        // Waiting for OnQuestionReceived or OnFinaleReceived to advance us
-        // Safety timeout: if we wait too long, go back to visible
+        // Safety timeout
         if (TransitionTimer > 10.0f)
         {
             UE_LOG(LogTemp, Warning, TEXT("[TranslatorsHUD] Transition timeout - returning to visible"));
@@ -528,7 +611,6 @@ void ATranslatorsHUD::UpdateTransition(float DeltaSeconds)
                 QuestionWidget->SetRenderOpacity(1.0f);
             }
             TransitionState = EHUDTransition::None;
-            // Reset question start time for input cooldown
             QuestionStartTime = GetWorld()->GetTimeSeconds();
         }
         break;
@@ -542,7 +624,28 @@ void ATranslatorsHUD::UpdateTransition(float DeltaSeconds)
 
 void ATranslatorsHUD::HandleKeyInput()
 {
-    // Only accept input when idle (no transition in progress)
+    APlayerController* PC = GetOwningPlayerController();
+    if (!PC)
+    {
+        return;
+    }
+
+    // Title state: Enter or Space to start
+    if (CurrentHUDState == EHUDState::Title)
+    {
+        if (PC->WasInputKeyJustPressed(EKeys::Enter) || PC->WasInputKeyJustPressed(EKeys::SpaceBar))
+        {
+            OnTitleStartRequested();
+        }
+        return;
+    }
+
+    // Only accept number key input during question state with no transition
+    if (CurrentHUDState != EHUDState::Questions)
+    {
+        return;
+    }
+
     if (TransitionState != EHUDTransition::None)
     {
         return;
@@ -564,12 +667,6 @@ void ATranslatorsHUD::HandleKeyInput()
         return;
     }
 
-    APlayerController* PC = GetOwningPlayerController();
-    if (!PC)
-    {
-        return;
-    }
-
     if (PC->WasInputKeyJustPressed(EKeys::One) || PC->WasInputKeyJustPressed(EKeys::NumPadOne))
     {
         OnAnswerSelected(0);
@@ -587,7 +684,6 @@ void ATranslatorsHUD::HandleKeyInput()
 
 void ATranslatorsHUD::OnAnswerSelected(int32 OptionIndex)
 {
-    // Prevent double-answers during transition
     if (TransitionState != EHUDTransition::None)
     {
         return;
@@ -595,19 +691,7 @@ void ATranslatorsHUD::OnAnswerSelected(int32 OptionIndex)
 
     UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Answer selected: option %d"), OptionIndex);
 
-    // Store answer for deferred sending
     PendingAnswerIndex = OptionIndex;
-
-    // Start transition: hold the selected answer visible
     TransitionState = EHUDTransition::AnswerHold;
     TransitionTimer = 0.0f;
-
-    // Visual feedback: highlight the selected option in the widget
-    if (QuestionWidget)
-    {
-        // The widget's HandleOptionClicked already handles highlighting
-        // For keyboard input, we need to manually trigger the visual
-        // OnAnswerSelected delegate was already broadcast by the widget for mouse clicks
-        // For keyboard, trigger it on the widget side too
-    }
 }

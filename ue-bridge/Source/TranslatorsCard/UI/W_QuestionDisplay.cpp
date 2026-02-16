@@ -12,6 +12,15 @@
 #include "Components/Border.h"
 #include "Components/SizeBox.h"
 #include "Blueprint/WidgetTree.h"
+#include "Misc/Paths.h"
+
+namespace
+{
+    FSlateFontInfo MakeFont(int32 Size)
+    {
+        return FSlateFontInfo(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), Size);
+    }
+}
 
 
 UW_QuestionDisplay::UW_QuestionDisplay(const FObjectInitializer& ObjectInitializer)
@@ -24,15 +33,19 @@ UW_QuestionDisplay::UW_QuestionDisplay(const FObjectInitializer& ObjectInitializ
 }
 
 
-void UW_QuestionDisplay::NativeConstruct()
+TSharedRef<SWidget> UW_QuestionDisplay::RebuildWidget()
 {
-    Super::NativeConstruct();
-
-    // If widgets aren't bound from Blueprint, create them programmatically
     if (!QuestionText || !OptionsContainer)
     {
         BuildWidgetTree();
     }
+    return Super::RebuildWidget();
+}
+
+
+void UW_QuestionDisplay::NativeConstruct()
+{
+    Super::NativeConstruct();
 
     // Apply colors
     if (BackgroundBorder)
@@ -89,15 +102,28 @@ void UW_QuestionDisplay::BuildWidgetTree()
     UVerticalBox* ContentBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ContentBox"));
     ContentSizeBox->AddChild(ContentBox);
 
-    // Progress text (top)
+    // Depth label (top - e.g. "SURFACE", "PATTERNS", etc.)
+    DepthText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DepthText"));
+    DepthText->SetText(FText::FromString(TEXT("SURFACE")));
+    DepthText->SetColorAndOpacity(FSlateColor(DepthLabelColor));
+    DepthText->SetJustification(ETextJustify::Center);
+
+    DepthText->SetFont(MakeFont(12));
+
+    UVerticalBoxSlot* DepthSlot = ContentBox->AddChildToVerticalBox(DepthText);
+    if (DepthSlot)
+    {
+        DepthSlot->SetPadding(FMargin(0.0f, 0.0f, 0.0f, 8.0f));
+        DepthSlot->SetHorizontalAlignment(HAlign_Center);
+    }
+
+    // Progress text
     ProgressText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ProgressText"));
     ProgressText->SetText(FText::FromString(TEXT("1 / 8")));
     ProgressText->SetColorAndOpacity(FSlateColor(ProgressTextColor));
     ProgressText->SetJustification(ETextJustify::Center);
 
-    FSlateFontInfo ProgressFont = ProgressText->GetFont();
-    ProgressFont.Size = 14;
-    ProgressText->SetFont(ProgressFont);
+    ProgressText->SetFont(MakeFont(14));
 
     UVerticalBoxSlot* ProgressSlot = ContentBox->AddChildToVerticalBox(ProgressText);
     if (ProgressSlot)
@@ -113,9 +139,7 @@ void UW_QuestionDisplay::BuildWidgetTree()
     QuestionText->SetJustification(ETextJustify::Center);
     QuestionText->SetAutoWrapText(true);
 
-    FSlateFontInfo QuestionFont = QuestionText->GetFont();
-    QuestionFont.Size = 24;
-    QuestionText->SetFont(QuestionFont);
+    QuestionText->SetFont(MakeFont(24));
 
     UVerticalBoxSlot* QuestionSlot = ContentBox->AddChildToVerticalBox(QuestionText);
     if (QuestionSlot)
@@ -140,6 +164,32 @@ void UW_QuestionDisplay::ShowQuestion(const FTranslatorsQuestion& Question)
 {
     CurrentQuestion = Question;
     SelectedOptionIndex = -1;
+
+    // Update depth label with tier-specific color
+    if (DepthText)
+    {
+        DepthText->SetText(FText::FromString(Question.DepthLabel));
+
+        // Color by tier
+        FLinearColor TierColor;
+        if (Question.DepthLabel == TEXT("SURFACE"))
+        {
+            TierColor = FLinearColor(0.5f, 0.8f, 0.5f, 1.0f);  // Sage green
+        }
+        else if (Question.DepthLabel == TEXT("PATTERNS"))
+        {
+            TierColor = FLinearColor(0.3f, 0.8f, 0.8f, 1.0f);  // Teal
+        }
+        else if (Question.DepthLabel == TEXT("FEELINGS"))
+        {
+            TierColor = FLinearColor(1.0f, 0.5f, 0.45f, 1.0f);  // Coral
+        }
+        else // CORE
+        {
+            TierColor = FLinearColor(1.0f, 0.85f, 0.3f, 1.0f);  // Gold
+        }
+        DepthText->SetColorAndOpacity(FSlateColor(TierColor));
+    }
 
     // Update question text
     if (QuestionText)
