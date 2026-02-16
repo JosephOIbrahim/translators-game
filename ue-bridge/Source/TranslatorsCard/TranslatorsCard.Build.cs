@@ -46,6 +46,10 @@ public class TranslatorsCard : ModuleRules
             // Note: USDA text parsing works without this module
             // This is only needed for live USD Stage manipulation
             PrivateDefinitions.Add("WITH_USD_SUPPORT=1");
+
+            // Remote Control API (editor-only)
+            // Enables REST API on localhost:30010 for external tool access
+            PrivateDependencyModuleNames.Add("RemoteControl");
         }
 
         // UMG / Slate UI support (required for question display widgets)
