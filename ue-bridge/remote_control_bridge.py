@@ -4,6 +4,9 @@ remote_control_bridge.py - REST API wrapper for UE5 Remote Control.
 Wraps the UE5 Remote Control plugin's HTTP API (localhost:30010).
 Used by the MCP server (Phase 3) and can be run standalone for testing.
 
+Result capture: Every script is wrapped to capture stdout and exceptions,
+writing results to a temp JSON file that the bridge reads back.
+
 Usage:
     python remote_control_bridge.py --test    # Run self-test (editor must be running)
     python remote_control_bridge.py --info    # Check if editor is reachable
@@ -12,13 +15,86 @@ Usage:
 import json
 import os
 import sys
+import time
 import argparse
+import uuid
 from typing import Any, Optional
 
 import httpx
 
 BASE_URL = "http://localhost:30010"
 TIMEOUT = 10.0
+RESULT_POLL_INTERVAL = 0.2  # seconds between result file checks
+RESULT_POLL_TIMEOUT = 10.0  # max seconds to wait for result
+
+
+def _make_temp_dir() -> str:
+    """Create and return the shared temp directory for UE scripts."""
+    import tempfile
+    d = os.path.join(tempfile.gettempdir(), "ue_mcp_scripts")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _wrap_code(code: str, result_file: str) -> str:
+    """Wrap user code with stdout capture and result file output.
+
+    The wrapper:
+    1. Redirects stdout to a StringIO buffer
+    2. Executes the user code
+    3. Writes {"output": captured_stdout, "error": null} to result_file
+    4. On exception, writes {"output": partial_stdout, "error": traceback_str}
+    """
+    # Escape the result path for embedding in Python string
+    safe_path = result_file.replace("\\", "/")
+    return f'''
+import sys as _sys, io as _io, traceback as _tb, json as _json
+
+_buf = _io.StringIO()
+_old_stdout = _sys.stdout
+_sys.stdout = _buf
+_error = None
+try:
+{_indent(code)}
+except Exception:
+    _error = _tb.format_exc()
+finally:
+    _sys.stdout = _old_stdout
+    _out = _buf.getvalue()
+    with open("{safe_path}", "w", encoding="utf-8") as _rf:
+        _json.dump({{"output": _out, "error": _error}}, _rf)
+'''
+
+
+def _indent(code: str, spaces: int = 4) -> str:
+    """Indent every line of code by `spaces`."""
+    prefix = " " * spaces
+    return "\n".join(prefix + line for line in code.splitlines())
+
+
+def _parse_result(raw: dict) -> dict:
+    """Parse a result file dict, extracting RESULT: lines if present."""
+    output = raw.get("output", "")
+    error = raw.get("error")
+
+    # Look for RESULT: lines in the output
+    result_data = None
+    output_lines = []
+    for line in output.splitlines():
+        if line.startswith("RESULT:"):
+            payload = line[len("RESULT:"):]
+            try:
+                result_data = json.loads(payload)
+            except (json.JSONDecodeError, ValueError):
+                result_data = payload
+        else:
+            output_lines.append(line)
+
+    return {
+        "result": result_data,
+        "output": "\n".join(output_lines).strip() if output_lines else "",
+        "error": error,
+    }
 
 
 class UnrealRemoteControl:
@@ -28,10 +104,7 @@ class UnrealRemoteControl:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._client = httpx.Client(base_url=self.base_url, timeout=self.timeout)
-        # Temp dir for Python script files sent to the editor
-        import tempfile
-        self._temp_dir = os.path.join(tempfile.gettempdir(), "ue_mcp_scripts")
-        os.makedirs(self._temp_dir, exist_ok=True)
+        self._temp_dir = _make_temp_dir()
 
     def close(self):
         self._client.close()
@@ -61,7 +134,7 @@ class UnrealRemoteControl:
             return False
 
     # ------------------------------------------------------------------
-    # Object property access
+    # Object property access (direct REST, no Python needed)
     # ------------------------------------------------------------------
 
     def get_property(self, object_path: str, property_name: str) -> Any:
@@ -92,25 +165,69 @@ class UnrealRemoteControl:
         return r.json()
 
     # ------------------------------------------------------------------
-    # Object function calls
+    # Python execution (core method — everything else builds on this)
     # ------------------------------------------------------------------
 
-    def call_function(
-        self,
-        object_path: str,
-        function_name: str,
-        params: Optional[dict] = None,
-    ) -> dict:
-        """Call a function on a UObject."""
-        payload: dict[str, Any] = {
-            "objectPath": object_path,
-            "functionName": function_name,
-        }
-        if params:
-            payload["parameters"] = params
-        r = self._client.put("/remote/object/call", json=payload)
+    def execute_python(self, code: str) -> dict:
+        """Execute Python code in the editor and return captured output.
+
+        Returns dict with keys:
+            result: parsed RESULT: line (JSON or string), or None
+            output: any other stdout lines
+            error:  traceback string if an exception occurred, or None
+        """
+        result_id = uuid.uuid4().hex[:12]
+        result_file = os.path.join(self._temp_dir, f"result_{result_id}.json").replace("\\", "/")
+        script_file = os.path.join(self._temp_dir, f"cmd_{result_id}.py").replace("\\", "/")
+
+        # Remove stale result file if it exists
+        if os.path.exists(result_file):
+            os.remove(result_file)
+
+        # Write wrapped script
+        wrapped = _wrap_code(code, result_file)
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write(wrapped)
+
+        # Send to editor
+        r = self._client.put(
+            "/remote/object/call",
+            json={
+                "objectPath": "/Script/Engine.Default__KismetSystemLibrary",
+                "functionName": "ExecuteConsoleCommand",
+                "parameters": {
+                    "WorldContextObject": "",
+                    "Command": f"py {script_file}",
+                },
+            },
+        )
         r.raise_for_status()
-        return r.json()
+
+        # Poll for result file
+        elapsed = 0.0
+        while elapsed < RESULT_POLL_TIMEOUT:
+            if os.path.exists(result_file):
+                try:
+                    with open(result_file, "r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                    # Clean up temp files
+                    os.remove(result_file)
+                    os.remove(script_file)
+                    return _parse_result(raw)
+                except (json.JSONDecodeError, OSError):
+                    pass  # File still being written
+            time.sleep(RESULT_POLL_INTERVAL)
+            elapsed += RESULT_POLL_INTERVAL
+
+        # Timeout — clean up and report
+        for p in (result_file, script_file):
+            if os.path.exists(p):
+                os.remove(p)
+        return {
+            "result": None,
+            "output": "",
+            "error": f"Timed out after {RESULT_POLL_TIMEOUT}s waiting for editor to execute script. Check UE5 Output Log for errors.",
+        }
 
     # ------------------------------------------------------------------
     # Actor operations
@@ -167,7 +284,7 @@ else:
         continue"""
 
         code = f"""
-import unreal
+import unreal, json
 subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 actors = subsystem.get_all_level_actors()
 results = []
@@ -178,7 +295,6 @@ for actor in actors:{filter_line}
         "path": actor.get_path_name(),
         "location": [actor.get_actor_location().x, actor.get_actor_location().y, actor.get_actor_location().z]
     }})
-import json
 print("RESULT:" + json.dumps(results))
 """
         return self.execute_python(code)
@@ -206,51 +322,13 @@ print("RESULT:" + json.dumps(results))
         return self.execute_python("\n".join(lines))
 
     # ------------------------------------------------------------------
-    # Python execution
-    # ------------------------------------------------------------------
-
-    def execute_python(self, code: str) -> dict:
-        """Execute arbitrary Python code in the editor context via Remote Control.
-
-        Uses KismetSystemLibrary.ExecuteConsoleCommand with the 'py' prefix,
-        which routes to the PythonScriptPlugin console command handler.
-        Requires bEnableRemoteControlConsoleExecution=True in project settings.
-        """
-        # Write code to a temp file and execute it, avoiding quote escaping issues
-        import tempfile
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, encoding="utf-8",
-            dir=self._temp_dir,
-        ) as f:
-            f.write(code)
-            temp_path = f.name.replace("\\", "/")
-
-        r = self._client.put(
-            "/remote/object/call",
-            json={
-                "objectPath": "/Script/Engine.Default__KismetSystemLibrary",
-                "functionName": "ExecuteConsoleCommand",
-                "parameters": {
-                    "WorldContextObject": "",
-                    "Command": f"py {temp_path}",
-                },
-            },
-        )
-        r.raise_for_status()
-        return {"executed": True, "temp_script": temp_path, "response": r.json()}
-
-    # ------------------------------------------------------------------
     # Asset operations
     # ------------------------------------------------------------------
 
     def find_assets(self, search_pattern: str, class_filter: Optional[str] = None) -> dict:
         """Search Content Browser for assets matching a pattern."""
-        class_line = ""
-        if class_filter:
-            class_line = f', unreal.TopLevelAssetPath("/Script/Engine", "{class_filter}")'
-
         code = f"""
-import unreal
+import unreal, json
 registry = unreal.AssetRegistryHelpers.get_asset_registry()
 assets = registry.get_assets_by_package_name("{search_pattern}") if "/" in "{search_pattern}" else []
 if not assets:
@@ -264,7 +342,6 @@ for a in assets[:50]:
         "path": str(a.package_name),
         "class": str(a.asset_class_path.asset_name) if hasattr(a.asset_class_path, 'asset_name') else str(a.asset_class_path)
     }})
-import json
 print("RESULT:" + json.dumps(results))
 """
         return self.execute_python(code)
@@ -272,12 +349,11 @@ print("RESULT:" + json.dumps(results))
     def get_level_info(self) -> dict:
         """Get info about the current level."""
         code = """
-import unreal
+import unreal, json
 world = unreal.EditorLevelLibrary.get_editor_world()
 subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 actors = subsystem.get_all_level_actors()
 level_name = world.get_name() if world else "Unknown"
-import json
 print("RESULT:" + json.dumps({
     "level_name": level_name,
     "actor_count": len(actors)
@@ -302,9 +378,7 @@ class AsyncUnrealRemoteControl:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
-        import tempfile
-        self._temp_dir = os.path.join(tempfile.gettempdir(), "ue_mcp_scripts")
-        os.makedirs(self._temp_dir, exist_ok=True)
+        self._temp_dir = _make_temp_dir()
 
     async def close(self):
         await self._client.aclose()
@@ -369,14 +443,25 @@ class AsyncUnrealRemoteControl:
         return r.json()
 
     async def execute_python(self, code: str) -> dict:
-        """Execute Python in the editor via console command + temp file."""
-        import tempfile
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".py", delete=False, encoding="utf-8",
-            dir=self._temp_dir,
-        ) as f:
-            f.write(code)
-            temp_path = f.name.replace("\\", "/")
+        """Execute Python code in the editor and return captured output.
+
+        Returns dict with keys:
+            result: parsed RESULT: line (JSON or string), or None
+            output: any other stdout lines
+            error:  traceback string if an exception occurred, or None
+        """
+        import asyncio
+
+        result_id = uuid.uuid4().hex[:12]
+        result_file = os.path.join(self._temp_dir, f"result_{result_id}.json").replace("\\", "/")
+        script_file = os.path.join(self._temp_dir, f"cmd_{result_id}.py").replace("\\", "/")
+
+        if os.path.exists(result_file):
+            os.remove(result_file)
+
+        wrapped = _wrap_code(code, result_file)
+        with open(script_file, "w", encoding="utf-8") as f:
+            f.write(wrapped)
 
         r = await self._client.put(
             "/remote/object/call",
@@ -385,12 +470,35 @@ class AsyncUnrealRemoteControl:
                 "functionName": "ExecuteConsoleCommand",
                 "parameters": {
                     "WorldContextObject": "",
-                    "Command": f"py {temp_path}",
+                    "Command": f"py {script_file}",
                 },
             },
         )
         r.raise_for_status()
-        return {"executed": True, "temp_script": temp_path, "response": r.json()}
+
+        # Poll for result file
+        elapsed = 0.0
+        while elapsed < RESULT_POLL_TIMEOUT:
+            if os.path.exists(result_file):
+                try:
+                    with open(result_file, "r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                    os.remove(result_file)
+                    os.remove(script_file)
+                    return _parse_result(raw)
+                except (json.JSONDecodeError, OSError):
+                    pass
+            await asyncio.sleep(RESULT_POLL_INTERVAL)
+            elapsed += RESULT_POLL_INTERVAL
+
+        for p in (result_file, script_file):
+            if os.path.exists(p):
+                os.remove(p)
+        return {
+            "result": None,
+            "output": "",
+            "error": f"Timed out after {RESULT_POLL_TIMEOUT}s waiting for editor to execute script.",
+        }
 
     async def spawn_actor(
         self,
@@ -438,7 +546,7 @@ else:
     if not actor.get_class().get_name() == "{class_filter}":
         continue"""
         code = f"""
-import unreal
+import unreal, json
 subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 actors = subsystem.get_all_level_actors()
 results = []
@@ -449,7 +557,6 @@ for actor in actors:{filter_line}
         "path": actor.get_path_name(),
         "location": [actor.get_actor_location().x, actor.get_actor_location().y, actor.get_actor_location().z]
     }})
-import json
 print("RESULT:" + json.dumps(results))
 """
         return await self.execute_python(code)
@@ -477,7 +584,7 @@ print("RESULT:" + json.dumps(results))
 
     async def find_assets(self, search_pattern: str, class_filter: Optional[str] = None) -> dict:
         code = f"""
-import unreal
+import unreal, json
 registry = unreal.AssetRegistryHelpers.get_asset_registry()
 assets = registry.get_assets_by_package_name("{search_pattern}") if "/" in "{search_pattern}" else []
 if not assets:
@@ -491,19 +598,17 @@ for a in assets[:50]:
         "path": str(a.package_name),
         "class": str(a.asset_class_path.asset_name) if hasattr(a.asset_class_path, 'asset_name') else str(a.asset_class_path)
     }})
-import json
 print("RESULT:" + json.dumps(results))
 """
         return await self.execute_python(code)
 
     async def get_level_info(self) -> dict:
         code = """
-import unreal
+import unreal, json
 world = unreal.EditorLevelLibrary.get_editor_world()
 subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 actors = subsystem.get_all_level_actors()
 level_name = world.get_name() if world else "Unknown"
-import json
 print("RESULT:" + json.dumps({
     "level_name": level_name,
     "actor_count": len(actors)
@@ -534,7 +639,7 @@ def main():
         if args.info or not args.test:
             if ue.is_connected():
                 info = ue.info()
-                print(f"Connected to UE5 Remote Control")
+                print("Connected to UE5 Remote Control")
                 print(json.dumps(info, indent=2))
             else:
                 print("ERROR: Cannot reach UE5 editor at localhost:30010")
@@ -555,19 +660,19 @@ def main():
                 location=(200, 200, 100),
                 label="BridgeTestCube"
             )
-            print(f"   Spawn result: {result}")
+            print(f"   Result: {result}")
 
             # 2. List actors
             print("2. Listing actors...")
             actors = ue.list_actors()
-            print(f"   Found actors: {actors}")
+            print(f"   Actors: {json.dumps(actors.get('result'), indent=4)}")
 
             # 3. Get level info
             print("3. Level info...")
             level_info = ue.get_level_info()
-            print(f"   Level: {level_info}")
+            print(f"   Level: {level_info.get('result')}")
 
-            # 4. Delete (via Python exec)
+            # 4. Delete
             print("4. Cleaning up test actor...")
             cleanup = ue.execute_python("""
 import unreal
@@ -581,7 +686,7 @@ for a in actors:
 else:
     print("RESULT:NOT_FOUND")
 """)
-            print(f"   Cleanup: {cleanup}")
+            print(f"   Cleanup: {cleanup.get('result')}")
 
             print("\n--- Test complete ---")
 
