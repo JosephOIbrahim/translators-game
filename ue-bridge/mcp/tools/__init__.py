@@ -6,6 +6,7 @@ from .python_exec import register as register_python_exec
 from .assets import register as register_assets
 from .level import register as register_level
 from .mograph import register as register_mograph
+from .blueprints import register as register_blueprints
 
 
 def register_all_tools(server, ue):
@@ -16,3 +17,4 @@ def register_all_tools(server, ue):
     register_assets(server, ue)
     register_level(server, ue)
     register_mograph(server, ue)
+    register_blueprints(server, ue)
