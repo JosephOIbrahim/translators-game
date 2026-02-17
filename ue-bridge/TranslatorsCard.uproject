@@ -71,6 +71,13 @@
 		{
 			"Name": "SequencerAnimTools",
 			"Enabled": true
+		},
+		{
+			"Name": "ViewportPerception",
+			"Enabled": true,
+			"SupportedTargetPlatforms": [
+				"Win64"
+			]
 		}
 	],
 	"TargetPlatforms": [
