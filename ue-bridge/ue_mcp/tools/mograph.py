@@ -7,6 +7,9 @@ All route through ue_execute_python under the hood.
 from __future__ import annotations
 
 import json
+import logging
+
+logger = logging.getLogger("ue5-mcp.tools.mograph")
 
 from ._validation import sanitize_label, sanitize_content_path, make_error
 

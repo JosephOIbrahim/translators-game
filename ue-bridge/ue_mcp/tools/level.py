@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+
+logger = logging.getLogger("ue5-mcp.tools.level")
 
 
 def register(server, ue):

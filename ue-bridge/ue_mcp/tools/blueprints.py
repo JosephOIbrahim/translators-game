@@ -10,6 +10,9 @@ Note on UE5.7 Python limitations:
 from __future__ import annotations
 
 import json
+import logging
+
+logger = logging.getLogger("ue5-mcp.tools.blueprints")
 
 from ._validation import (
     sanitize_class_name, sanitize_label, sanitize_content_path,

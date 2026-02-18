@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
+
+logger = logging.getLogger("ue5-mcp.tools.properties")
 
 from ._validation import sanitize_object_path, sanitize_property_name, make_error
 

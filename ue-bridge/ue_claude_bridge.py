@@ -68,8 +68,11 @@ class ClaudeBridgeHandler(BaseHTTPRequestHandler):
 
         except json.JSONDecodeError as e:
             self.send_json({'error': f'Invalid JSON: {str(e)}'}, 400)
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            unreal.log_error(f"[ClaudeBridge] Command error: {type(e).__name__}: {str(e)}")
+            self.send_json({'error': str(e)}, 500)
         except Exception as e:
-            unreal.log_error(f"[ClaudeBridge] Error: {str(e)}")
+            unreal.log_error(f"[ClaudeBridge] Unexpected error: {type(e).__name__}: {str(e)}")
             self.send_json({'error': str(e)}, 500)
 
     def execute_command(self, command):

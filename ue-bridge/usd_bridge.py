@@ -26,12 +26,16 @@ Requirements:
 Author: Translators Bridge v2.0.0
 """
 
+from contextlib import contextmanager
 from datetime import datetime
+import logging
 import os
 from pathlib import Path
 import re
 import tempfile
 from typing import Optional, Dict, Any, List
+
+logger = logging.getLogger("ue5-bridge.usd")
 
 # Try to import OpenUSD Python bindings
 try:
@@ -55,21 +59,66 @@ BRIDGE_VERSION = "2.0.0"
 # ATOMIC FILE I/O
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _atomic_write(file_path: Path, content: str) -> None:
-    """Write content to file atomically via tmp + os.replace (NTFS-safe)."""
-    parent = file_path.parent
-    fd, tmp_path = tempfile.mkstemp(dir=str(parent), suffix=".tmp", prefix=".bridge_")
+@contextmanager
+def _file_lock(file_path: Path, timeout: float = 5.0):
+    """Advisory file lock using msvcrt on Windows, fcntl on Unix.
+
+    Acquires an exclusive lock on a .lock file adjacent to the target.
+    Falls back to no-op if locking is unavailable.
+    """
+    lock_path = file_path.with_suffix(file_path.suffix + ".lock")
+    lock_fd = None
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp_path, str(file_path))
-    except BaseException:
-        # Clean up temp file on any failure
+        lock_fd = open(lock_path, "w", encoding="utf-8")
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+            import msvcrt
+            import time
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        logger.warning("File lock timeout on %s", file_path.name)
+                        break
+                    time.sleep(0.05)
+        except ImportError:
+            try:
+                import fcntl
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            except ImportError:
+                pass  # No locking available — proceed without
+        yield
+    finally:
+        if lock_fd is not None:
+            try:
+                try:
+                    import msvcrt
+                    msvcrt.locking(lock_fd.fileno(), msvcrt.LK_UNLCK, 1)
+                except (ImportError, OSError):
+                    pass
+                lock_fd.close()
+            except OSError:
+                pass
+
+
+def _atomic_write(file_path: Path, content: str) -> None:
+    """Write content to file atomically via tmp + os.replace (NTFS-safe), with file locking."""
+    parent = file_path.parent
+    with _file_lock(file_path):
+        fd, tmp_path = tempfile.mkstemp(dir=str(parent), suffix=".tmp", prefix=".bridge_")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, str(file_path))
+        except BaseException:
+            # Clean up temp file on any failure
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
 
 def _safe_read(file_path: Path, retries: int = 3, delay: float = 0.05) -> Optional[str]:

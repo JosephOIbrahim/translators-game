@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from ._validation import sanitize_class_name, sanitize_label, sanitize_object_path, make_error
+
+logger = logging.getLogger("ue5-mcp.tools.actors")
 
 
 def register(server, ue):

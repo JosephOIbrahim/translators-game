@@ -13,6 +13,7 @@ Usage:
 """
 
 import json
+import logging
 import os
 import sys
 import time
@@ -22,11 +23,90 @@ from typing import Any, Optional
 
 import httpx
 
+logger = logging.getLogger("ue5-mcp.bridge")
+
 BASE_URL = os.environ.get("UE_REMOTE_URL", "http://localhost:30010")
 TIMEOUT = 10.0
 RESULT_POLL_INTERVAL = 0.2  # seconds between result file checks
 RESULT_POLL_TIMEOUT = 10.0  # max seconds to wait for result
 MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MB cap on JSON responses
+
+# Circuit breaker settings
+CB_FAILURE_THRESHOLD = 5    # consecutive failures before opening
+CB_RECOVERY_TIMEOUT = 30.0  # seconds before half-open retry
+CB_HALF_OPEN_MAX = 1        # max concurrent requests in half-open
+
+# Connection pool settings
+POOL_MAX_CONNECTIONS = 10
+POOL_MAX_KEEPALIVE = 5
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Circuit Breaker
+# ══════════════════════════════════════════════════════════════════════════════
+
+class CircuitBreaker:
+    """Simple circuit breaker for UE5 connection resilience.
+
+    States:
+    - CLOSED: normal operation, requests pass through
+    - OPEN: failures exceeded threshold, requests fail-fast
+    - HALF_OPEN: recovery timeout elapsed, allow one probe request
+    """
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+    def __init__(self, failure_threshold: int = CB_FAILURE_THRESHOLD,
+                 recovery_timeout: float = CB_RECOVERY_TIMEOUT):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self._state = self.CLOSED
+        self._failure_count = 0
+        self._last_failure_time = 0.0
+
+    @property
+    def state(self) -> str:
+        if self._state == self.OPEN:
+            if time.time() - self._last_failure_time >= self.recovery_timeout:
+                self._state = self.HALF_OPEN
+                logger.info("Circuit breaker -> HALF_OPEN (attempting recovery)")
+        return self._state
+
+    def allow_request(self) -> bool:
+        s = self.state
+        if s == self.CLOSED:
+            return True
+        if s == self.HALF_OPEN:
+            return True  # allow probe
+        return False  # OPEN
+
+    def record_success(self):
+        if self._state in (self.HALF_OPEN, self.OPEN):
+            logger.info("Circuit breaker -> CLOSED (connection recovered)")
+        self._state = self.CLOSED
+        self._failure_count = 0
+
+    def record_failure(self):
+        self._failure_count += 1
+        self._last_failure_time = time.time()
+        if self._failure_count >= self.failure_threshold:
+            if self._state != self.OPEN:
+                logger.warning(
+                    "Circuit breaker -> OPEN after %d failures (cooldown %.0fs)",
+                    self._failure_count, self.recovery_timeout,
+                )
+            self._state = self.OPEN
+
+    def fail_fast_error(self) -> dict:
+        wait = max(0, self.recovery_timeout - (time.time() - self._last_failure_time))
+        return {
+            "result": None,
+            "output": "",
+            "error": f"Circuit breaker OPEN — UE5 editor unreachable after {self._failure_count} "
+                     f"consecutive failures. Retry in {wait:.0f}s, or restart the editor.",
+        }
 
 
 def _make_temp_dir() -> str:
@@ -286,11 +366,14 @@ def _poll_result_sync(result_file: str, script_file: str) -> dict:
                 os.remove(result_file)
                 os.remove(script_file)
                 return _parse_result(raw)
-            except (json.JSONDecodeError, OSError):
-                pass
+            except json.JSONDecodeError as e:
+                logger.warning("Corrupt result file %s: %s", result_file, e)
+            except OSError as e:
+                logger.warning("Could not read result file %s: %s", result_file, e)
         time.sleep(RESULT_POLL_INTERVAL)
         elapsed += RESULT_POLL_INTERVAL
 
+    logger.warning("Timed out after %.1fs waiting for %s", RESULT_POLL_TIMEOUT, result_file)
     _cleanup_files(result_file, script_file)
     return _timeout_result()
 
@@ -306,11 +389,14 @@ async def _poll_result_async(result_file: str, script_file: str) -> dict:
                 os.remove(result_file)
                 os.remove(script_file)
                 return _parse_result(raw)
-            except (json.JSONDecodeError, OSError):
-                pass
+            except json.JSONDecodeError as e:
+                logger.warning("Corrupt result file %s: %s", result_file, e)
+            except OSError as e:
+                logger.warning("Could not read result file %s: %s", result_file, e)
         await asyncio.sleep(RESULT_POLL_INTERVAL)
         elapsed += RESULT_POLL_INTERVAL
 
+    logger.warning("Timed out after %.1fs waiting for %s", RESULT_POLL_TIMEOUT, result_file)
     _cleanup_files(result_file, script_file)
     return _timeout_result()
 
@@ -339,8 +425,16 @@ class UnrealRemoteControl:
     def __init__(self, base_url: str = BASE_URL, timeout: float = TIMEOUT):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._client = httpx.Client(base_url=self.base_url, timeout=self.timeout)
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            limits=httpx.Limits(
+                max_connections=POOL_MAX_CONNECTIONS,
+                max_keepalive_connections=POOL_MAX_KEEPALIVE,
+            ),
+        )
         self._temp_dir = _make_temp_dir()
+        self._cb = CircuitBreaker()
 
     def close(self):
         self._client.close()
@@ -359,8 +453,10 @@ class UnrealRemoteControl:
     def is_connected(self) -> bool:
         try:
             self.info()
+            self._cb.record_success()
             return True
         except (httpx.ConnectError, httpx.TimeoutException):
+            self._cb.record_failure()
             return False
 
     def get_property(self, object_path: str, property_name: str) -> Any:
@@ -385,10 +481,19 @@ class UnrealRemoteControl:
         return r.json()
 
     def execute_python(self, code: str) -> dict:
-        result_file, script_file, _ = _prepare_execution(self._temp_dir, code)
-        r = self._client.put("/remote/object/call", json=_build_exec_payload(script_file))
-        r.raise_for_status()
-        return _poll_result_sync(result_file, script_file)
+        if not self._cb.allow_request():
+            return self._cb.fail_fast_error()
+        try:
+            result_file, script_file, _ = _prepare_execution(self._temp_dir, code)
+            r = self._client.put("/remote/object/call", json=_build_exec_payload(script_file))
+            r.raise_for_status()
+            result = _poll_result_sync(result_file, script_file)
+            self._cb.record_success()
+            return result
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            self._cb.record_failure()
+            logger.error("UE5 connection failed: %s", e)
+            return {"result": None, "output": "", "error": f"Connection failed: {e}"}
 
     def spawn_actor(self, class_path: str, location=(0, 0, 0), rotation=(0, 0, 0), label=None) -> dict:
         return self.execute_python(_CodeGen.spawn_actor_code(class_path, location, rotation, label))
@@ -422,8 +527,16 @@ class AsyncUnrealRemoteControl:
     def __init__(self, base_url: str = BASE_URL, timeout: float = TIMEOUT):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            limits=httpx.Limits(
+                max_connections=POOL_MAX_CONNECTIONS,
+                max_keepalive_connections=POOL_MAX_KEEPALIVE,
+            ),
+        )
         self._temp_dir = _make_temp_dir()
+        self._cb = CircuitBreaker()
 
     async def close(self):
         await self._client.aclose()
@@ -442,8 +555,10 @@ class AsyncUnrealRemoteControl:
     async def is_connected(self) -> bool:
         try:
             await self.info()
+            self._cb.record_success()
             return True
         except (httpx.ConnectError, httpx.TimeoutException):
+            self._cb.record_failure()
             return False
 
     async def get_property(self, object_path: str, property_name: str) -> Any:
@@ -476,10 +591,19 @@ class AsyncUnrealRemoteControl:
         return r.json()
 
     async def execute_python(self, code: str) -> dict:
-        result_file, script_file, _ = _prepare_execution(self._temp_dir, code)
-        r = await self._client.put("/remote/object/call", json=_build_exec_payload(script_file))
-        r.raise_for_status()
-        return await _poll_result_async(result_file, script_file)
+        if not self._cb.allow_request():
+            return self._cb.fail_fast_error()
+        try:
+            result_file, script_file, _ = _prepare_execution(self._temp_dir, code)
+            r = await self._client.put("/remote/object/call", json=_build_exec_payload(script_file))
+            r.raise_for_status()
+            result = await _poll_result_async(result_file, script_file)
+            self._cb.record_success()
+            return result
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            self._cb.record_failure()
+            logger.error("UE5 connection failed: %s", e)
+            return {"result": None, "output": "", "error": f"Connection failed: {e}"}
 
     async def spawn_actor(self, class_path: str, location=(0, 0, 0), rotation=(0, 0, 0), label=None) -> dict:
         return await self.execute_python(_CodeGen.spawn_actor_code(class_path, location, rotation, label))

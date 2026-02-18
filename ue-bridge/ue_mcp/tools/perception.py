@@ -10,12 +10,15 @@ the current game state (question, sync_status) for full situational awareness.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
 from pathlib import Path
 
 import httpx
+
+logger = logging.getLogger("ue5-mcp.tools.perception")
 
 PERCEPTION_URL = os.environ.get("UE_PERCEPTION_URL", "http://localhost:30011")
 PERCEPTION_TIMEOUT = 5.0

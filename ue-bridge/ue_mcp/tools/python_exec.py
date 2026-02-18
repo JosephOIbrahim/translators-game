@@ -10,8 +10,11 @@ operations (subprocess, os.system, file deletion, etc.).
 from __future__ import annotations
 
 import json
+import logging
 
 from ._validation import validate_python_code, make_error
+
+logger = logging.getLogger("ue5-mcp.tools.python_exec")
 
 
 def register(server, ue):
@@ -47,7 +50,11 @@ def register(server, ue):
         # Validate code before sending to editor
         error = validate_python_code(code)
         if error:
+            logger.warning("Code validation blocked: %s", error)
             return make_error(f"Code validation failed: {error}")
 
+        logger.info("Executing Python (%d chars)", len(code))
         result = await ue.execute_python(code)
+        if isinstance(result, dict) and result.get("error"):
+            logger.warning("Python exec error: %s", result["error"][:200])
         return json.dumps(result, indent=2)
