@@ -23,6 +23,8 @@ from typing import Any, Optional
 
 import httpx
 
+from ue_mcp.metrics import metrics
+
 logger = logging.getLogger("ue5-mcp.bridge")
 
 BASE_URL = os.environ.get("UE_REMOTE_URL", "http://localhost:30010")
@@ -591,17 +593,24 @@ class AsyncUnrealRemoteControl:
         return r.json()
 
     async def execute_python(self, code: str) -> dict:
+        metrics.inc("requests.total")
         if not self._cb.allow_request():
+            metrics.inc("requests.circuit_breaker_rejected")
             return self._cb.fail_fast_error()
+        t0 = time.time()
         try:
             result_file, script_file, _ = _prepare_execution(self._temp_dir, code)
             r = await self._client.put("/remote/object/call", json=_build_exec_payload(script_file))
             r.raise_for_status()
             result = await _poll_result_async(result_file, script_file)
             self._cb.record_success()
+            metrics.inc("requests.success")
+            metrics.record_latency("execute_python", time.time() - t0)
             return result
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             self._cb.record_failure()
+            metrics.inc("requests.error")
+            metrics.record_latency("execute_python", time.time() - t0)
             logger.error("UE5 connection failed: %s", e)
             return {"result": None, "output": "", "error": f"Connection failed: {e}"}
 
