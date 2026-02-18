@@ -27,8 +27,10 @@ Author: Translators Bridge v2.0.0
 """
 
 from datetime import datetime
+import os
 from pathlib import Path
 import re
+import tempfile
 from typing import Optional, Dict, Any, List
 
 # Try to import OpenUSD Python bindings
@@ -47,6 +49,39 @@ except ImportError:
 DEFAULT_BRIDGE_PATH = Path.home() / ".translators"
 BRIDGE_STATE_FILE = "bridge_state.usda"
 BRIDGE_VERSION = "2.0.0"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ATOMIC FILE I/O
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _atomic_write(file_path: Path, content: str) -> None:
+    """Write content to file atomically via tmp + os.replace (NTFS-safe)."""
+    parent = file_path.parent
+    fd, tmp_path = tempfile.mkstemp(dir=str(parent), suffix=".tmp", prefix=".bridge_")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp_path, str(file_path))
+    except BaseException:
+        # Clean up temp file on any failure
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _safe_read(file_path: Path, retries: int = 3, delay: float = 0.05) -> Optional[str]:
+    """Read file with retry on Windows file-lock errors."""
+    import time
+    for attempt in range(retries):
+        try:
+            return file_path.read_text(encoding="utf-8")
+        except (PermissionError, OSError):
+            if attempt < retries - 1:
+                time.sleep(delay * (2 ** attempt))  # Exponential backoff
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -179,6 +214,76 @@ def _write_question_pxr(
     return file_path
 
 
+def _update_question_incremental(
+    file_path: Path,
+    question_id: str,
+    text: str,
+    options: List[Dict[str, str]],
+    index: int,
+    total: int,
+    scene: str,
+    timestamp: str
+) -> bool:
+    """Incrementally update an existing bridge_state.usda (patch, not rewrite).
+
+    Returns True if successful, False if full rewrite needed (file missing/corrupt).
+    """
+    content = _safe_read(file_path)
+    if content is None or 'def Xform "Message"' not in content:
+        return False
+
+    def esc(s: str) -> str:
+        return s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+
+    # 1. Update variants
+    content = re.sub(r'(string sync_status = ")[^"]*(")', r'\g<1>question_pending\g<2>', content)
+    content = re.sub(r'(string message_type = ")[^"]*(")', r'\g<1>question\g<2>', content)
+
+    # 2. Replace Message prim
+    new_message = f'''def Xform "Message" {{
+        string type = "question"
+        int index = {index}
+        int total = {total}
+        string timestamp = "{timestamp}"
+        string question_id = "{esc(question_id)}"
+        string text = "{esc(text)}"
+        string scene = "{esc(scene)}"
+        string progress_display = "{index + 1}/{total}"
+    }}'''
+    content = re.sub(r'def Xform "Message"[^}]*\}', new_message, content, flags=re.DOTALL)
+
+    # 3. Replace Options prim (rebuild with new options)
+    options_inner = ""
+    for i, opt in enumerate(options[:3]):
+        label = esc(opt.get("label", ""))
+        direction = esc(opt.get("direction", ""))
+        semantic_tag = esc(opt.get("semantic_tag", ""))
+        options_inner += f'''
+        def Xform "Option_{i}" {{
+            int index = {i}
+            string label = "{label}"
+            string direction = "{direction}"
+            string semantic_tag = "{semantic_tag}"
+        }}
+'''
+    new_options = f'def Xform "Options" {{{options_inner}    }}'
+    content = re.sub(r'def Xform "Options"[^}]*(?:\{[^}]*\}[^}]*)*\}', new_options, content, flags=re.DOTALL)
+
+    # 4. Reset answer prim for new question
+    new_answer = '''def Xform "Answer" {
+        string question_id = ""
+        int option_index = -1
+        double response_time_ms = 0.0
+        string selected_label = ""
+        string selected_direction = ""
+        string timestamp = ""
+    }'''
+    content = re.sub(r'def Xform "Answer"[^}]*\}', new_answer, content, flags=re.DOTALL)
+
+    _atomic_write(file_path, content)
+    return True
+
+
 def _write_question_text(
     file_path: Path,
     question_id: str,
@@ -189,7 +294,14 @@ def _write_question_text(
     scene: str,
     timestamp: str
 ) -> Path:
-    """Write question using text-based USDA generation (fallback when pxr unavailable)."""
+    """Write question using text-based USDA generation (fallback when pxr unavailable).
+
+    Tries incremental update first; falls back to full rewrite if file doesn't exist.
+    """
+    # Try incremental update if file already exists
+    if file_path.exists():
+        if _update_question_incremental(file_path, question_id, text, options, index, total, scene, timestamp):
+            return file_path
 
     # Escape strings for USDA
     def escape_usda_string(s: str) -> str:
@@ -324,7 +436,7 @@ def Xform "BridgeState" (
 }}
 '''
 
-    file_path.write_text(usda_content, encoding='utf-8')
+    _atomic_write(file_path, usda_content)
     return file_path
 
 
@@ -399,7 +511,9 @@ def _read_answer_pxr(file_path: Path) -> Optional[Dict[str, Any]]:
 def _read_answer_text(file_path: Path) -> Optional[Dict[str, Any]]:
     """Read answer using text parsing (fallback when pxr unavailable)."""
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = _safe_read(file_path)
+        if content is None:
+            return None
 
         # Check sync_status variant
         sync_match = re.search(r'string sync_status = "([^"]*)"', content)
@@ -498,7 +612,9 @@ def _set_variant_pxr(file_path: Path, variant_set: str, variant: str) -> bool:
 def _set_variant_text(file_path: Path, variant_set: str, variant: str) -> bool:
     """Set variant using text replacement (fallback)."""
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = _safe_read(file_path)
+        if content is None:
+            return False
 
         # Replace variant selection in the variants = {...} block
         pattern = rf'(string {variant_set} = ")[^"]*(")'
@@ -508,7 +624,7 @@ def _set_variant_text(file_path: Path, variant_set: str, variant: str) -> bool:
         if new_content == content:
             return False
 
-        file_path.write_text(new_content, encoding='utf-8')
+        _atomic_write(file_path, new_content)
         return True
 
     except Exception as e:
@@ -595,7 +711,9 @@ def _write_transition_text(
 ) -> bool:
     """Write transition using text replacement (fallback)."""
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = _safe_read(file_path)
+        if content is None:
+            return False
 
         # Update variants
         content = re.sub(
@@ -627,7 +745,7 @@ def _write_transition_text(
             flags=re.DOTALL
         )
 
-        file_path.write_text(content, encoding='utf-8')
+        _atomic_write(file_path, content)
         return True
 
     except Exception as e:
@@ -742,7 +860,9 @@ def _write_finale_text(
 ) -> bool:
     """Write finale using text replacement (fallback)."""
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = _safe_read(file_path)
+        if content is None:
+            return False
 
         # Update variants
         content = re.sub(
@@ -775,7 +895,7 @@ def _write_finale_text(
             flags=re.DOTALL
         )
 
-        file_path.write_text(content, encoding='utf-8')
+        _atomic_write(file_path, content)
         return True
 
     except Exception as e:
@@ -902,7 +1022,7 @@ def Xform "BridgeState" (
 }}
 '''
 
-    file_path.write_text(usda_content, encoding='utf-8')
+    _atomic_write(file_path, usda_content)
     return file_path
 
 
@@ -919,7 +1039,9 @@ def read_ack_usda(bridge_path: Optional[Path] = None) -> Optional[Dict[str, Any]
         return None
 
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = _safe_read(file_path)
+        if content is None:
+            return None
 
         # Check message_type variant
         type_match = re.search(r'string message_type = "([^"]*)"', content)
@@ -977,7 +1099,9 @@ def read_behavioral_signals(bridge_path: Optional[Path] = None) -> Optional[Dict
         return None
 
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = _safe_read(file_path)
+        if content is None:
+            return None
 
         # Find BehavioralSignals prim section
         signals_match = re.search(
@@ -1182,7 +1306,10 @@ def validate_bridge_state(bridge_path: Optional[Path] = None) -> Dict[str, Any]:
         return result
 
     try:
-        content = file_path.read_text(encoding='utf-8')
+        content = _safe_read(file_path)
+        if content is None:
+            result["errors"].append("Could not read file (locked or permission denied)")
+            return result
 
         # Check USDA header
         if not content.startswith("#usda 1.0"):

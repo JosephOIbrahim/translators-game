@@ -2,17 +2,74 @@
 
 Consumes from the ViewportPerception C++ plugin's HTTP endpoint (port 30011).
 Falls back to SceneCapture2D via ue_execute_python if the plugin is unavailable.
+
+Tier 3I: Includes bridge state correlation — viewport frames are tagged with
+the current game state (question, sync_status) for full situational awareness.
 """
 
 from __future__ import annotations
 
-import base64
 import json
+import os
+import re
+import time
+from pathlib import Path
 
 import httpx
 
 PERCEPTION_URL = "http://localhost:30011"
 PERCEPTION_TIMEOUT = 5.0
+BRIDGE_DIR = Path.home() / ".translators"
+
+
+def _read_bridge_state() -> dict | None:
+    """Read current bridge state from bridge_state.usda (non-blocking, best-effort)."""
+    state_file = BRIDGE_DIR / "bridge_state.usda"
+    heartbeat_file = BRIDGE_DIR / "heartbeat.json"
+
+    result = {
+        "bridge_connected": False,
+        "sync_status": None,
+        "message_type": None,
+        "current_question": None,
+        "question_index": None,
+        "question_total": None,
+        "heartbeat_alive": False,
+    }
+
+    # Read bridge state
+    if state_file.exists():
+        try:
+            content = state_file.read_text(encoding="utf-8")
+            result["bridge_connected"] = True
+
+            sync_match = re.search(r'string sync_status = "([^"]*)"', content)
+            type_match = re.search(r'string message_type = "([^"]*)"', content)
+            qid_match = re.search(r'string question_id = "([^"]*)"', content)
+            idx_match = re.search(r'int index = (\d+)', content)
+            total_match = re.search(r'int total = (\d+)', content)
+            text_match = re.search(r'string text = "([^"]*)"', content)
+
+            result["sync_status"] = sync_match.group(1) if sync_match else None
+            result["message_type"] = type_match.group(1) if type_match else None
+            result["current_question"] = qid_match.group(1) if qid_match else None
+            result["question_index"] = int(idx_match.group(1)) if idx_match else None
+            result["question_total"] = int(total_match.group(1)) if total_match else None
+            if text_match and text_match.group(1):
+                result["question_text"] = text_match.group(1)[:100]  # Truncate for payload size
+        except (OSError, PermissionError):
+            pass
+
+    # Check heartbeat
+    if heartbeat_file.exists():
+        try:
+            age = time.time() - heartbeat_file.stat().st_mtime
+            result["heartbeat_alive"] = age < 15
+            result["heartbeat_age_s"] = round(age, 1)
+        except OSError:
+            pass
+
+    return result
 
 
 async def _perception_request(method: str, path: str, body: dict | None = None) -> dict | None:
@@ -141,7 +198,7 @@ def register(server, ue):
         format: str = "jpeg",
         include_image: bool = True,
     ) -> str:
-        """Capture a single viewport perception packet."""
+        """Capture a single viewport perception packet with correlated game state."""
 
         # Try the C++ plugin endpoint first
         result = await _perception_request("GET", "/perception/frame")
@@ -167,6 +224,12 @@ def register(server, ue):
 
         if not include_image and isinstance(result, dict):
             result.pop("image", None)
+
+        # Correlate with bridge game state
+        if isinstance(result, dict):
+            bridge_state = _read_bridge_state()
+            if bridge_state:
+                result["game_state"] = bridge_state
 
         return json.dumps(result, indent=2)
 

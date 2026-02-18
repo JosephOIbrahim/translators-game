@@ -20,8 +20,11 @@ Usage:
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -41,6 +44,7 @@ try:
         validate_bridge_state,
         get_bridge_file_path,
         ensure_bridge_directory,
+        compute_checksum as _usd_compute_checksum,
     )
     HAS_USD_BRIDGE = True
 except ImportError:
@@ -57,8 +61,12 @@ ANSWER_FILE = BRIDGE_DIR / "answer.json"
 ACK_FILE = BRIDGE_DIR / "ack.json"
 PROFILE_FILE = BRIDGE_DIR / "cognitive_profile.usda"
 
-POLL_INTERVAL = 0.25  # seconds
+POLL_INTERVAL_MIN = 0.05   # 50ms — fast start
+POLL_INTERVAL_MAX = 0.5    # 500ms — ceiling
+POLL_BACKOFF_FACTOR = 1.5  # multiply interval each miss
 BRIDGE_VERSION = "2.0.0"
+HEARTBEAT_INTERVAL = 5.0   # seconds between heartbeat writes
+HEARTBEAT_FILE = BRIDGE_DIR / "heartbeat.json"
 
 # USD mode flag (set by CLI args or auto-detect)
 USE_USD_MODE = HAS_USD_BRIDGE
@@ -173,6 +181,49 @@ class Colors:
     RESET = '\033[0m'
     BOLD = '\033[1m'
 
+class HeartbeatWriter:
+    """Background thread that writes heartbeat.json every HEARTBEAT_INTERVAL seconds."""
+
+    def __init__(self):
+        self._stop_event = threading.Event()
+        self._thread = None
+
+    def start(self):
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2)
+
+    def _run(self):
+        while not self._stop_event.is_set():
+            try:
+                heartbeat = {
+                    "timestamp": datetime.now().isoformat(),
+                    "pid": __import__("os").getpid(),
+                    "bridge_version": BRIDGE_VERSION,
+                    "alive": True,
+                }
+                # Write atomically via tmp + replace
+                import tempfile, os
+                fd, tmp = tempfile.mkstemp(dir=str(BRIDGE_DIR), suffix=".tmp")
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(heartbeat, f)
+                os.replace(tmp, str(HEARTBEAT_FILE))
+            except Exception:
+                pass  # Best-effort — don't crash the bridge
+            self._stop_event.wait(HEARTBEAT_INTERVAL)
+
+
+def _adaptive_sleep(poll_interval: float) -> float:
+    """Sleep and return the next (backed-off) interval."""
+    time.sleep(poll_interval)
+    return min(poll_interval * POLL_BACKOFF_FACTOR, POLL_INTERVAL_MAX)
+
+
 def clear_screen():
     try:
         import os
@@ -216,6 +267,21 @@ def print_question(q: dict, index: int, total: int):
 #  Bridge Communication
 # ============================================
 
+def _atomic_write_json(file_path: Path, data: dict) -> None:
+    """Write JSON atomically via tmp + os.replace."""
+    fd, tmp = tempfile.mkstemp(dir=str(file_path.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, str(file_path))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def ensure_bridge_dir():
     """Create bridge directory if it doesn't exist."""
     BRIDGE_DIR.mkdir(parents=True, exist_ok=True)
@@ -223,7 +289,7 @@ def ensure_bridge_dir():
 
 def clear_bridge_files():
     """Remove stale communication files."""
-    for f in [STATE_FILE, ANSWER_FILE, ACK_FILE]:
+    for f in [STATE_FILE, ANSWER_FILE, ACK_FILE, HEARTBEAT_FILE]:
         if f.exists():
             f.unlink()
 
@@ -277,13 +343,13 @@ def write_question(question: dict, index: int, total: int):
         "bridge_version": BRIDGE_VERSION
     }
 
-    with open(STATE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(state, f, indent=2)
+    _atomic_write_json(STATE_FILE, state)
 
 def wait_for_answer(question: dict = None, timeout: float = 300.0) -> Optional[dict]:
-    """Wait for answer from UE5 (USD or JSON mode)."""
+    """Wait for answer from UE5 (USD or JSON mode) with adaptive backoff polling."""
     global USE_USD_MODE
     start = time.time()
+    poll_interval = POLL_INTERVAL_MIN  # Start fast, back off on misses
 
     while time.time() - start < timeout:
         # Try USD mode first
@@ -293,7 +359,7 @@ def wait_for_answer(question: dict = None, timeout: float = 300.0) -> Optional[d
                 if answer_data and answer_data.get("option_index", -1) >= 0:
                     # Match question_id if provided
                     if question and answer_data.get("question_id") != question.get("id"):
-                        time.sleep(POLL_INTERVAL)
+                        poll_interval = _adaptive_sleep(poll_interval)
                         continue
 
                     # Clear answer state
@@ -332,7 +398,7 @@ def wait_for_answer(question: dict = None, timeout: float = 300.0) -> Optional[d
             except (json.JSONDecodeError, IOError):
                 pass
 
-        time.sleep(POLL_INTERVAL)
+        poll_interval = _adaptive_sleep(poll_interval)
 
     return None
 
@@ -364,8 +430,7 @@ def write_transition(direction: str, next_scene: str, progress: float = 0.0, fro
         "bridge_version": BRIDGE_VERSION
     }
 
-    with open(STATE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(state, f, indent=2)
+    _atomic_write_json(STATE_FILE, state)
 
 
 def write_finale(profile_path: str, checksum: str = "", total_answered: int = 8):
@@ -398,20 +463,19 @@ def write_finale(profile_path: str, checksum: str = "", total_answered: int = 8)
         "bridge_version": BRIDGE_VERSION
     }
 
-    with open(STATE_FILE, 'w', encoding='utf-8') as f:
-        json.dump(state, f, indent=2)
+    _atomic_write_json(STATE_FILE, state)
 
 # ============================================
 #  Profile Generation (USD Cognitive Substrate v4.3.0)
 # ============================================
 
 def compute_checksum(dimensions: dict) -> str:
-    """Compute deterministic checksum for profile (ThinkingMachines compliant)."""
-    # Sort dimensions alphabetically
+    """Compute deterministic checksum for profile. Delegates to usd_bridge canonical implementation."""
+    if HAS_USD_BRIDGE:
+        return _usd_compute_checksum(dimensions)
+    # Inline fallback when usd_bridge unavailable
     sorted_dims = sorted(dimensions.items())
-    # Serialize as dimension:value|...
-    serialized = f"TRL_v1|" + "|".join(f"{k}:{v}" for k, v in sorted_dims)
-    # DJB2 hash to 8-char hex
+    serialized = "TRL_v1|" + "|".join(f"{k}:{v}" for k, v in sorted_dims)
     hash_val = 5381
     for char in serialized:
         hash_val = ((hash_val << 5) + hash_val) + ord(char)
@@ -549,9 +613,18 @@ def Xform "CognitiveSubstrate" (
 }}
 '''
 
-    # Write file
-    with open(PROFILE_FILE, 'w', encoding='utf-8') as f:
-        f.write(usda_content)
+    # Write file atomically
+    fd, tmp = tempfile.mkstemp(dir=str(PROFILE_FILE.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(usda_content)
+        os.replace(tmp, str(PROFILE_FILE))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
     return str(PROFILE_FILE), checksum
 
@@ -605,6 +678,10 @@ def run_questionnaire(force_json: bool = False):
     answers = []
     total = len(QUESTIONS)
 
+    # Start heartbeat writer
+    heartbeat = HeartbeatWriter()
+    heartbeat.start()
+
     # Initialize USD bridge (unless JSON forced)
     if force_json:
         USE_USD_MODE = False
@@ -622,17 +699,17 @@ def run_questionnaire(force_json: bool = False):
             "timestamp": datetime.now().isoformat(),
             "bridge_version": BRIDGE_VERSION
         }
-        with open(STATE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(ready_state, f, indent=2)
+        _atomic_write_json(STATE_FILE, ready_state)
 
     mode_str = "USD" if USE_USD_MODE else "JSON"
     print(f"\n  {Colors.GREEN}<={Colors.RESET} Bridge ready at {BRIDGE_DIR}")
     print(f"  {Colors.DIM}Mode: {mode_str} | Press Play in UE5 to begin...{Colors.RESET}\n")
 
-    # Wait for UE5 acknowledgment
+    # Wait for UE5 acknowledgment (adaptive polling)
     print(f"  Waiting for UE5 acknowledgment...")
     ack_received = False
     ack_start = time.time()
+    ack_poll = POLL_INTERVAL_MIN
     while time.time() - ack_start < 120:
         if ANSWER_FILE.exists():
             try:
@@ -645,7 +722,7 @@ def run_questionnaire(force_json: bool = False):
                     break
             except (json.JSONDecodeError, IOError):
                 pass
-        time.sleep(POLL_INTERVAL)
+        ack_poll = _adaptive_sleep(ack_poll)
 
     if not ack_received:
         print(f"  {Colors.YELLOW}No ack received, starting anyway...{Colors.RESET}\n")
@@ -721,6 +798,9 @@ def run_questionnaire(force_json: bool = False):
 
     # Send finale to UE5
     write_finale(profile_path, checksum, len(answers))
+
+    # Stop heartbeat
+    heartbeat.stop()
 
     print(f"  {Colors.DIM}[TRANSLATORS:{checksum}]{Colors.RESET}")
     print()

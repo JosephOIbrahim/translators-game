@@ -97,6 +97,229 @@ def _parse_result(raw: dict) -> dict:
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Code generation mixin — shared between sync and async clients.
+# All UE5 Python script strings are built here, once.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class _CodeGen:
+    """Generates UE5 Python scripts. No I/O — pure string construction."""
+
+    @staticmethod
+    def spawn_actor_code(
+        class_path: str,
+        location: tuple[float, float, float],
+        rotation: tuple[float, float, float],
+        label: Optional[str],
+    ) -> str:
+        loc_str = f"unreal.Vector({location[0]}, {location[1]}, {location[2]})"
+        rot_str = f"unreal.Rotator({rotation[0]}, {rotation[1]}, {rotation[2]})"
+        label_line = f'\n    actor.set_actor_label("{label}")' if label else ""
+        return f"""
+import unreal
+subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+actor = subsystem.spawn_actor_from_class(
+    unreal.EditorAssetLibrary.load_blueprint_class("{class_path}") if "/" in "{class_path}" else getattr(unreal, "{class_path}"),
+    {loc_str},
+    {rot_str}
+)
+if actor:{label_line}
+    result = actor.get_path_name()
+else:
+    result = "SPAWN_FAILED"
+print("RESULT:" + result)
+"""
+
+    @staticmethod
+    def delete_actor_code(actor_path: str) -> str:
+        return f"""
+import unreal
+subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+actor = unreal.EditorAssetLibrary.load_asset("{actor_path}")
+if actor:
+    subsystem.destroy_actor(actor)
+    print("RESULT:DELETED")
+else:
+    print("RESULT:NOT_FOUND")
+"""
+
+    @staticmethod
+    def list_actors_code(class_filter: Optional[str] = None) -> str:
+        filter_line = ""
+        if class_filter:
+            filter_line = f"""
+    if not actor.get_class().get_name() == "{class_filter}":
+        continue"""
+        return f"""
+import unreal, json
+subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+actors = subsystem.get_all_level_actors()
+results = []
+for actor in actors:{filter_line}
+    results.append({{
+        "name": actor.get_actor_label(),
+        "class": actor.get_class().get_name(),
+        "path": actor.get_path_name(),
+        "location": [actor.get_actor_location().x, actor.get_actor_location().y, actor.get_actor_location().z]
+    }})
+print("RESULT:" + json.dumps(results))
+"""
+
+    @staticmethod
+    def set_actor_transform_code(
+        actor_path: str,
+        location: Optional[tuple[float, float, float]],
+        rotation: Optional[tuple[float, float, float]],
+        scale: Optional[tuple[float, float, float]],
+    ) -> str:
+        lines = ["import unreal"]
+        lines.append(f'actor = unreal.EditorAssetLibrary.load_asset("{actor_path}")')
+        lines.append("if actor:")
+        if location:
+            lines.append(f"    actor.set_actor_location(unreal.Vector({location[0]}, {location[1]}, {location[2]}), False, False)")
+        if rotation:
+            lines.append(f"    actor.set_actor_rotation(unreal.Rotator({rotation[0]}, {rotation[1]}, {rotation[2]}), False)")
+        if scale:
+            lines.append(f"    actor.set_actor_scale3d(unreal.Vector({scale[0]}, {scale[1]}, {scale[2]}))")
+        lines.append('    print("RESULT:OK")')
+        lines.append('else:')
+        lines.append('    print("RESULT:NOT_FOUND")')
+        return "\n".join(lines)
+
+    @staticmethod
+    def find_assets_code(search_pattern: str, class_filter: Optional[str] = None) -> str:
+        return f"""
+import unreal, json
+registry = unreal.AssetRegistryHelpers.get_asset_registry()
+assets = registry.get_assets_by_package_name("{search_pattern}") if "/" in "{search_pattern}" else []
+if not assets:
+    filt = unreal.ARFilter()
+    assets = registry.get_all_assets(filt)
+    assets = [a for a in assets if "{search_pattern}".lower() in str(a.asset_name).lower()]
+results = []
+for a in assets[:50]:
+    results.append({{
+        "name": str(a.asset_name),
+        "path": str(a.package_name),
+        "class": str(a.asset_class_path.asset_name) if hasattr(a.asset_class_path, 'asset_name') else str(a.asset_class_path)
+    }})
+print("RESULT:" + json.dumps(results))
+"""
+
+    @staticmethod
+    def get_level_info_code() -> str:
+        return """
+import unreal, json
+world = unreal.EditorLevelLibrary.get_editor_world()
+subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+actors = subsystem.get_all_level_actors()
+level_name = world.get_name() if world else "Unknown"
+print("RESULT:" + json.dumps({
+    "level_name": level_name,
+    "actor_count": len(actors)
+}))
+"""
+
+    @staticmethod
+    def save_level_code() -> str:
+        return """
+import unreal
+unreal.EditorLevelLibrary.save_current_level()
+print("RESULT:SAVED")
+"""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Execution helpers — write-to-file + poll-for-result pattern
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _prepare_execution(temp_dir: str, code: str) -> tuple[str, str, str]:
+    """Prepare a script for execution. Returns (result_file, script_file, wrapped_code)."""
+    result_id = uuid.uuid4().hex[:12]
+    result_file = os.path.join(temp_dir, f"result_{result_id}.json").replace("\\", "/")
+    script_file = os.path.join(temp_dir, f"cmd_{result_id}.py").replace("\\", "/")
+
+    if os.path.exists(result_file):
+        os.remove(result_file)
+
+    wrapped = _wrap_code(code, result_file)
+    with open(script_file, "w", encoding="utf-8") as f:
+        f.write(wrapped)
+
+    return result_file, script_file, wrapped
+
+
+def _build_exec_payload(script_file: str) -> dict:
+    """Build the Remote Control call payload for script execution."""
+    return {
+        "objectPath": "/Script/Engine.Default__KismetSystemLibrary",
+        "functionName": "ExecuteConsoleCommand",
+        "parameters": {
+            "WorldContextObject": "",
+            "Command": f"py {script_file}",
+        },
+    }
+
+
+def _poll_result_sync(result_file: str, script_file: str) -> dict:
+    """Poll for result file (synchronous)."""
+    elapsed = 0.0
+    while elapsed < RESULT_POLL_TIMEOUT:
+        if os.path.exists(result_file):
+            try:
+                with open(result_file, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                os.remove(result_file)
+                os.remove(script_file)
+                return _parse_result(raw)
+            except (json.JSONDecodeError, OSError):
+                pass
+        time.sleep(RESULT_POLL_INTERVAL)
+        elapsed += RESULT_POLL_INTERVAL
+
+    _cleanup_files(result_file, script_file)
+    return _timeout_result()
+
+
+async def _poll_result_async(result_file: str, script_file: str) -> dict:
+    """Poll for result file (async)."""
+    import asyncio
+    elapsed = 0.0
+    while elapsed < RESULT_POLL_TIMEOUT:
+        if os.path.exists(result_file):
+            try:
+                with open(result_file, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                os.remove(result_file)
+                os.remove(script_file)
+                return _parse_result(raw)
+            except (json.JSONDecodeError, OSError):
+                pass
+        await asyncio.sleep(RESULT_POLL_INTERVAL)
+        elapsed += RESULT_POLL_INTERVAL
+
+    _cleanup_files(result_file, script_file)
+    return _timeout_result()
+
+
+def _cleanup_files(*paths: str):
+    for p in paths:
+        if os.path.exists(p):
+            os.remove(p)
+
+
+def _timeout_result() -> dict:
+    return {
+        "result": None,
+        "output": "",
+        "error": f"Timed out after {RESULT_POLL_TIMEOUT}s waiting for editor to execute script. Check UE5 Output Log for errors.",
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Synchronous client
+# ══════════════════════════════════════════════════════════════════════════════
+
 class UnrealRemoteControl:
     """Synchronous wrapper around UE5 Remote Control REST API."""
 
@@ -115,43 +338,27 @@ class UnrealRemoteControl:
     def __exit__(self, *args):
         self.close()
 
-    # ------------------------------------------------------------------
-    # Health / info
-    # ------------------------------------------------------------------
-
     def info(self) -> dict:
-        """GET /remote/info - check if Remote Control is running."""
         r = self._client.get("/remote/info")
         r.raise_for_status()
         return r.json()
 
     def is_connected(self) -> bool:
-        """Return True if the editor's Remote Control API is reachable."""
         try:
             self.info()
             return True
         except (httpx.ConnectError, httpx.TimeoutException):
             return False
 
-    # ------------------------------------------------------------------
-    # Object property access (direct REST, no Python needed)
-    # ------------------------------------------------------------------
-
     def get_property(self, object_path: str, property_name: str) -> Any:
-        """GET a property value from a UObject by path."""
         r = self._client.put(
             "/remote/object/property",
-            json={
-                "objectPath": object_path,
-                "propertyName": property_name,
-                "access": "READ_ACCESS",
-            },
+            json={"objectPath": object_path, "propertyName": property_name, "access": "READ_ACCESS"},
         )
         r.raise_for_status()
         return r.json()
 
     def set_property(self, object_path: str, property_name: str, value: Any) -> dict:
-        """SET a property value on a UObject by path."""
         r = self._client.put(
             "/remote/object/property",
             json={
@@ -164,212 +371,37 @@ class UnrealRemoteControl:
         r.raise_for_status()
         return r.json()
 
-    # ------------------------------------------------------------------
-    # Python execution (core method — everything else builds on this)
-    # ------------------------------------------------------------------
-
     def execute_python(self, code: str) -> dict:
-        """Execute Python code in the editor and return captured output.
-
-        Returns dict with keys:
-            result: parsed RESULT: line (JSON or string), or None
-            output: any other stdout lines
-            error:  traceback string if an exception occurred, or None
-        """
-        result_id = uuid.uuid4().hex[:12]
-        result_file = os.path.join(self._temp_dir, f"result_{result_id}.json").replace("\\", "/")
-        script_file = os.path.join(self._temp_dir, f"cmd_{result_id}.py").replace("\\", "/")
-
-        # Remove stale result file if it exists
-        if os.path.exists(result_file):
-            os.remove(result_file)
-
-        # Write wrapped script
-        wrapped = _wrap_code(code, result_file)
-        with open(script_file, "w", encoding="utf-8") as f:
-            f.write(wrapped)
-
-        # Send to editor
-        r = self._client.put(
-            "/remote/object/call",
-            json={
-                "objectPath": "/Script/Engine.Default__KismetSystemLibrary",
-                "functionName": "ExecuteConsoleCommand",
-                "parameters": {
-                    "WorldContextObject": "",
-                    "Command": f"py {script_file}",
-                },
-            },
-        )
+        result_file, script_file, _ = _prepare_execution(self._temp_dir, code)
+        r = self._client.put("/remote/object/call", json=_build_exec_payload(script_file))
         r.raise_for_status()
+        return _poll_result_sync(result_file, script_file)
 
-        # Poll for result file
-        elapsed = 0.0
-        while elapsed < RESULT_POLL_TIMEOUT:
-            if os.path.exists(result_file):
-                try:
-                    with open(result_file, "r", encoding="utf-8") as f:
-                        raw = json.load(f)
-                    # Clean up temp files
-                    os.remove(result_file)
-                    os.remove(script_file)
-                    return _parse_result(raw)
-                except (json.JSONDecodeError, OSError):
-                    pass  # File still being written
-            time.sleep(RESULT_POLL_INTERVAL)
-            elapsed += RESULT_POLL_INTERVAL
-
-        # Timeout — clean up and report
-        for p in (result_file, script_file):
-            if os.path.exists(p):
-                os.remove(p)
-        return {
-            "result": None,
-            "output": "",
-            "error": f"Timed out after {RESULT_POLL_TIMEOUT}s waiting for editor to execute script. Check UE5 Output Log for errors.",
-        }
-
-    # ------------------------------------------------------------------
-    # Actor operations
-    # ------------------------------------------------------------------
-
-    def spawn_actor(
-        self,
-        class_path: str,
-        location: tuple[float, float, float] = (0, 0, 0),
-        rotation: tuple[float, float, float] = (0, 0, 0),
-        label: Optional[str] = None,
-    ) -> dict:
-        """Spawn an actor via Python execution in the editor."""
-        loc_str = f"unreal.Vector({location[0]}, {location[1]}, {location[2]})"
-        rot_str = f"unreal.Rotator({rotation[0]}, {rotation[1]}, {rotation[2]})"
-        label_line = f'\n    actor.set_actor_label("{label}")' if label else ""
-
-        code = f"""
-import unreal
-subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-actor = subsystem.spawn_actor_from_class(
-    unreal.EditorAssetLibrary.load_blueprint_class("{class_path}") if "/" in "{class_path}" else getattr(unreal, "{class_path}"),
-    {loc_str},
-    {rot_str}
-)
-if actor:{label_line}
-    result = actor.get_path_name()
-else:
-    result = "SPAWN_FAILED"
-print("RESULT:" + result)
-"""
-        return self.execute_python(code)
+    def spawn_actor(self, class_path: str, location=(0, 0, 0), rotation=(0, 0, 0), label=None) -> dict:
+        return self.execute_python(_CodeGen.spawn_actor_code(class_path, location, rotation, label))
 
     def delete_actor(self, actor_path: str) -> dict:
-        """Delete an actor by its object path."""
-        code = f"""
-import unreal
-subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-actor = unreal.EditorAssetLibrary.load_asset("{actor_path}")
-if actor:
-    subsystem.destroy_actor(actor)
-    print("RESULT:DELETED")
-else:
-    print("RESULT:NOT_FOUND")
-"""
-        return self.execute_python(code)
+        return self.execute_python(_CodeGen.delete_actor_code(actor_path))
 
     def list_actors(self, class_filter: Optional[str] = None) -> dict:
-        """List actors in the current level."""
-        filter_line = ""
-        if class_filter:
-            filter_line = f"""
-    if not actor.get_class().get_name() == "{class_filter}":
-        continue"""
+        return self.execute_python(_CodeGen.list_actors_code(class_filter))
 
-        code = f"""
-import unreal, json
-subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-actors = subsystem.get_all_level_actors()
-results = []
-for actor in actors:{filter_line}
-    results.append({{
-        "name": actor.get_actor_label(),
-        "class": actor.get_class().get_name(),
-        "path": actor.get_path_name(),
-        "location": [actor.get_actor_location().x, actor.get_actor_location().y, actor.get_actor_location().z]
-    }})
-print("RESULT:" + json.dumps(results))
-"""
-        return self.execute_python(code)
-
-    def set_actor_transform(
-        self,
-        actor_path: str,
-        location: Optional[tuple[float, float, float]] = None,
-        rotation: Optional[tuple[float, float, float]] = None,
-        scale: Optional[tuple[float, float, float]] = None,
-    ) -> dict:
-        """Set location/rotation/scale on an actor."""
-        lines = ["import unreal"]
-        lines.append(f'actor = unreal.EditorAssetLibrary.load_asset("{actor_path}")')
-        lines.append("if actor:")
-        if location:
-            lines.append(f"    actor.set_actor_location(unreal.Vector({location[0]}, {location[1]}, {location[2]}), False, False)")
-        if rotation:
-            lines.append(f"    actor.set_actor_rotation(unreal.Rotator({rotation[0]}, {rotation[1]}, {rotation[2]}), False)")
-        if scale:
-            lines.append(f"    actor.set_actor_scale3d(unreal.Vector({scale[0]}, {scale[1]}, {scale[2]}))")
-        lines.append('    print("RESULT:OK")')
-        lines.append('else:')
-        lines.append('    print("RESULT:NOT_FOUND")')
-        return self.execute_python("\n".join(lines))
-
-    # ------------------------------------------------------------------
-    # Asset operations
-    # ------------------------------------------------------------------
+    def set_actor_transform(self, actor_path, location=None, rotation=None, scale=None) -> dict:
+        return self.execute_python(_CodeGen.set_actor_transform_code(actor_path, location, rotation, scale))
 
     def find_assets(self, search_pattern: str, class_filter: Optional[str] = None) -> dict:
-        """Search Content Browser for assets matching a pattern."""
-        code = f"""
-import unreal, json
-registry = unreal.AssetRegistryHelpers.get_asset_registry()
-assets = registry.get_assets_by_package_name("{search_pattern}") if "/" in "{search_pattern}" else []
-if not assets:
-    filt = unreal.ARFilter()
-    assets = registry.get_all_assets(filt)
-    assets = [a for a in assets if "{search_pattern}".lower() in str(a.asset_name).lower()]
-results = []
-for a in assets[:50]:
-    results.append({{
-        "name": str(a.asset_name),
-        "path": str(a.package_name),
-        "class": str(a.asset_class_path.asset_name) if hasattr(a.asset_class_path, 'asset_name') else str(a.asset_class_path)
-    }})
-print("RESULT:" + json.dumps(results))
-"""
-        return self.execute_python(code)
+        return self.execute_python(_CodeGen.find_assets_code(search_pattern, class_filter))
 
     def get_level_info(self) -> dict:
-        """Get info about the current level."""
-        code = """
-import unreal, json
-world = unreal.EditorLevelLibrary.get_editor_world()
-subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-actors = subsystem.get_all_level_actors()
-level_name = world.get_name() if world else "Unknown"
-print("RESULT:" + json.dumps({
-    "level_name": level_name,
-    "actor_count": len(actors)
-}))
-"""
-        return self.execute_python(code)
+        return self.execute_python(_CodeGen.get_level_info_code())
 
     def save_level(self) -> dict:
-        """Save the current level."""
-        code = """
-import unreal
-unreal.EditorLevelLibrary.save_current_level()
-print("RESULT:SAVED")
-"""
-        return self.execute_python(code)
+        return self.execute_python(_CodeGen.save_level_code())
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Async client (for MCP server)
+# ══════════════════════════════════════════════════════════════════════════════
 
 class AsyncUnrealRemoteControl:
     """Async wrapper for MCP server use (httpx.AsyncClient)."""
@@ -404,11 +436,7 @@ class AsyncUnrealRemoteControl:
     async def get_property(self, object_path: str, property_name: str) -> Any:
         r = await self._client.put(
             "/remote/object/property",
-            json={
-                "objectPath": object_path,
-                "propertyName": property_name,
-                "access": "READ_ACCESS",
-            },
+            json={"objectPath": object_path, "propertyName": property_name, "access": "READ_ACCESS"},
         )
         r.raise_for_status()
         return r.json()
@@ -426,16 +454,8 @@ class AsyncUnrealRemoteControl:
         r.raise_for_status()
         return r.json()
 
-    async def call_function(
-        self,
-        object_path: str,
-        function_name: str,
-        params: Optional[dict] = None,
-    ) -> dict:
-        payload: dict[str, Any] = {
-            "objectPath": object_path,
-            "functionName": function_name,
-        }
+    async def call_function(self, object_path: str, function_name: str, params: Optional[dict] = None) -> dict:
+        payload: dict[str, Any] = {"objectPath": object_path, "functionName": function_name}
         if params:
             payload["parameters"] = params
         r = await self._client.put("/remote/object/call", json=payload)
@@ -443,186 +463,31 @@ class AsyncUnrealRemoteControl:
         return r.json()
 
     async def execute_python(self, code: str) -> dict:
-        """Execute Python code in the editor and return captured output.
-
-        Returns dict with keys:
-            result: parsed RESULT: line (JSON or string), or None
-            output: any other stdout lines
-            error:  traceback string if an exception occurred, or None
-        """
-        import asyncio
-
-        result_id = uuid.uuid4().hex[:12]
-        result_file = os.path.join(self._temp_dir, f"result_{result_id}.json").replace("\\", "/")
-        script_file = os.path.join(self._temp_dir, f"cmd_{result_id}.py").replace("\\", "/")
-
-        if os.path.exists(result_file):
-            os.remove(result_file)
-
-        wrapped = _wrap_code(code, result_file)
-        with open(script_file, "w", encoding="utf-8") as f:
-            f.write(wrapped)
-
-        r = await self._client.put(
-            "/remote/object/call",
-            json={
-                "objectPath": "/Script/Engine.Default__KismetSystemLibrary",
-                "functionName": "ExecuteConsoleCommand",
-                "parameters": {
-                    "WorldContextObject": "",
-                    "Command": f"py {script_file}",
-                },
-            },
-        )
+        result_file, script_file, _ = _prepare_execution(self._temp_dir, code)
+        r = await self._client.put("/remote/object/call", json=_build_exec_payload(script_file))
         r.raise_for_status()
+        return await _poll_result_async(result_file, script_file)
 
-        # Poll for result file
-        elapsed = 0.0
-        while elapsed < RESULT_POLL_TIMEOUT:
-            if os.path.exists(result_file):
-                try:
-                    with open(result_file, "r", encoding="utf-8") as f:
-                        raw = json.load(f)
-                    os.remove(result_file)
-                    os.remove(script_file)
-                    return _parse_result(raw)
-                except (json.JSONDecodeError, OSError):
-                    pass
-            await asyncio.sleep(RESULT_POLL_INTERVAL)
-            elapsed += RESULT_POLL_INTERVAL
-
-        for p in (result_file, script_file):
-            if os.path.exists(p):
-                os.remove(p)
-        return {
-            "result": None,
-            "output": "",
-            "error": f"Timed out after {RESULT_POLL_TIMEOUT}s waiting for editor to execute script.",
-        }
-
-    async def spawn_actor(
-        self,
-        class_path: str,
-        location: tuple[float, float, float] = (0, 0, 0),
-        rotation: tuple[float, float, float] = (0, 0, 0),
-        label: Optional[str] = None,
-    ) -> dict:
-        loc_str = f"unreal.Vector({location[0]}, {location[1]}, {location[2]})"
-        rot_str = f"unreal.Rotator({rotation[0]}, {rotation[1]}, {rotation[2]})"
-        label_line = f'\n    actor.set_actor_label("{label}")' if label else ""
-        code = f"""
-import unreal
-subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-actor = subsystem.spawn_actor_from_class(
-    unreal.EditorAssetLibrary.load_blueprint_class("{class_path}") if "/" in "{class_path}" else getattr(unreal, "{class_path}"),
-    {loc_str},
-    {rot_str}
-)
-if actor:{label_line}
-    result = actor.get_path_name()
-else:
-    result = "SPAWN_FAILED"
-print("RESULT:" + result)
-"""
-        return await self.execute_python(code)
+    async def spawn_actor(self, class_path: str, location=(0, 0, 0), rotation=(0, 0, 0), label=None) -> dict:
+        return await self.execute_python(_CodeGen.spawn_actor_code(class_path, location, rotation, label))
 
     async def delete_actor(self, actor_path: str) -> dict:
-        code = f"""
-import unreal
-subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-actor = unreal.EditorAssetLibrary.load_asset("{actor_path}")
-if actor:
-    subsystem.destroy_actor(actor)
-    print("RESULT:DELETED")
-else:
-    print("RESULT:NOT_FOUND")
-"""
-        return await self.execute_python(code)
+        return await self.execute_python(_CodeGen.delete_actor_code(actor_path))
 
     async def list_actors(self, class_filter: Optional[str] = None) -> dict:
-        filter_line = ""
-        if class_filter:
-            filter_line = f"""
-    if not actor.get_class().get_name() == "{class_filter}":
-        continue"""
-        code = f"""
-import unreal, json
-subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-actors = subsystem.get_all_level_actors()
-results = []
-for actor in actors:{filter_line}
-    results.append({{
-        "name": actor.get_actor_label(),
-        "class": actor.get_class().get_name(),
-        "path": actor.get_path_name(),
-        "location": [actor.get_actor_location().x, actor.get_actor_location().y, actor.get_actor_location().z]
-    }})
-print("RESULT:" + json.dumps(results))
-"""
-        return await self.execute_python(code)
+        return await self.execute_python(_CodeGen.list_actors_code(class_filter))
 
-    async def set_actor_transform(
-        self,
-        actor_path: str,
-        location: Optional[tuple[float, float, float]] = None,
-        rotation: Optional[tuple[float, float, float]] = None,
-        scale: Optional[tuple[float, float, float]] = None,
-    ) -> dict:
-        lines = ["import unreal"]
-        lines.append(f'actor = unreal.EditorAssetLibrary.load_asset("{actor_path}")')
-        lines.append("if actor:")
-        if location:
-            lines.append(f"    actor.set_actor_location(unreal.Vector({location[0]}, {location[1]}, {location[2]}), False, False)")
-        if rotation:
-            lines.append(f"    actor.set_actor_rotation(unreal.Rotator({rotation[0]}, {rotation[1]}, {rotation[2]}), False)")
-        if scale:
-            lines.append(f"    actor.set_actor_scale3d(unreal.Vector({scale[0]}, {scale[1]}, {scale[2]}))")
-        lines.append('    print("RESULT:OK")')
-        lines.append('else:')
-        lines.append('    print("RESULT:NOT_FOUND")')
-        return await self.execute_python("\n".join(lines))
+    async def set_actor_transform(self, actor_path, location=None, rotation=None, scale=None) -> dict:
+        return await self.execute_python(_CodeGen.set_actor_transform_code(actor_path, location, rotation, scale))
 
     async def find_assets(self, search_pattern: str, class_filter: Optional[str] = None) -> dict:
-        code = f"""
-import unreal, json
-registry = unreal.AssetRegistryHelpers.get_asset_registry()
-assets = registry.get_assets_by_package_name("{search_pattern}") if "/" in "{search_pattern}" else []
-if not assets:
-    filt = unreal.ARFilter()
-    assets = registry.get_all_assets(filt)
-    assets = [a for a in assets if "{search_pattern}".lower() in str(a.asset_name).lower()]
-results = []
-for a in assets[:50]:
-    results.append({{
-        "name": str(a.asset_name),
-        "path": str(a.package_name),
-        "class": str(a.asset_class_path.asset_name) if hasattr(a.asset_class_path, 'asset_name') else str(a.asset_class_path)
-    }})
-print("RESULT:" + json.dumps(results))
-"""
-        return await self.execute_python(code)
+        return await self.execute_python(_CodeGen.find_assets_code(search_pattern, class_filter))
 
     async def get_level_info(self) -> dict:
-        code = """
-import unreal, json
-world = unreal.EditorLevelLibrary.get_editor_world()
-subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-actors = subsystem.get_all_level_actors()
-level_name = world.get_name() if world else "Unknown"
-print("RESULT:" + json.dumps({
-    "level_name": level_name,
-    "actor_count": len(actors)
-}))
-"""
-        return await self.execute_python(code)
+        return await self.execute_python(_CodeGen.get_level_info_code())
 
     async def save_level(self) -> dict:
-        code = """
-import unreal
-unreal.EditorLevelLibrary.save_current_level()
-print("RESULT:SAVED")
-"""
-        return await self.execute_python(code)
+        return await self.execute_python(_CodeGen.save_level_code())
 
 
 # ------------------------------------------------------------------

@@ -5,7 +5,7 @@ Communicates with UE5 via the Remote Control plugin REST API (localhost:30010).
 Runs as an MCP server over stdio transport using FastMCP.
 
 Usage (registered via `claude mcp add`):
-    python mcp_server.py
+    python ue_mcp/mcp_server.py
 """
 
 import sys
@@ -13,21 +13,14 @@ import os
 import json
 import logging
 
-# Resolve import collision: our directory is also called "mcp" which shadows the
-# pip-installed mcp package. Remove our dir from sys.path so the real mcp is found.
-_this_dir = os.path.dirname(os.path.abspath(__file__))
-_parent_dir = os.path.dirname(_this_dir)
-sys.path = [p for p in sys.path if os.path.abspath(p) != _this_dir]
+# Ensure the ue-bridge root is importable (for remote_control_bridge)
+_parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent_dir not in sys.path:
-    sys.path.append(_parent_dir)
+    sys.path.insert(0, _parent_dir)
 
 from mcp.server.fastmcp import FastMCP
 from remote_control_bridge import AsyncUnrealRemoteControl
-
-# Re-add our dir for local tools import, then remove
-sys.path.insert(0, _this_dir)
-from tools import register_all_tools
-sys.path.remove(_this_dir)
+from ue_mcp.tools import register_all_tools
 
 logging.basicConfig(
     level=logging.INFO,
