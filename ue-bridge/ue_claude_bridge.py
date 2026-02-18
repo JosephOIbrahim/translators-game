@@ -23,9 +23,10 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-# Configuration
-BRIDGE_PORT = 8765
-BRIDGE_HOST = 'localhost'
+# Configuration (overridable via environment variables)
+import os as _os
+BRIDGE_PORT = int(_os.environ.get('UE_BRIDGE_PORT', '8765'))
+BRIDGE_HOST = _os.environ.get('UE_BRIDGE_HOST', 'localhost')
 
 # Global reference to the server
 _server = None

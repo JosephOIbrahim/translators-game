@@ -11,6 +11,16 @@ from __future__ import annotations
 
 import json
 
+from ._validation import (
+    sanitize_class_name, sanitize_label, sanitize_content_path,
+    sanitize_property_name, make_error,
+)
+
+
+def _escape_for_fstring(s: str) -> str:
+    """Escape a string for safe embedding in an f-string Python code template."""
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'").replace("\n", "\\n")
+
 
 def register(server, ue):
     @server.tool(
@@ -31,16 +41,26 @@ def register(server, ue):
         parent_class: str = "Actor",
     ) -> str:
         """Create a new Blueprint class asset."""
+        if err := sanitize_label(name, "name"):
+            return make_error(err)
+        if err := sanitize_content_path(folder, "folder"):
+            return make_error(err)
+        if err := sanitize_class_name(parent_class, "parent_class"):
+            return make_error(err)
+
+        safe_name = _escape_for_fstring(name)
+        safe_folder = _escape_for_fstring(folder)
+        safe_class = _escape_for_fstring(parent_class)
         code = f"""
 import unreal
 
 asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
 factory = unreal.BlueprintFactory()
-factory.set_editor_property("ParentClass", getattr(unreal, "{parent_class}", unreal.Actor))
+factory.set_editor_property("ParentClass", getattr(unreal, "{safe_class}", unreal.Actor))
 
-blueprint = asset_tools.create_asset("{name}", "{folder}", None, factory)
+blueprint = asset_tools.create_asset("{safe_name}", "{safe_folder}", None, factory)
 if blueprint:
-    unreal.EditorAssetLibrary.save_asset("{folder}/{name}")
+    unreal.EditorAssetLibrary.save_asset("{safe_folder}/{safe_name}")
     print("RESULT:" + blueprint.get_path_name())
 else:
     print("RESULT:CREATE_FAILED")
@@ -70,7 +90,18 @@ else:
         component_name: str | None = None,
     ) -> str:
         """Add a component to a live actor by label. Uses new_object + k2_attach_to."""
+        if err := sanitize_label(actor_label, "actor_label"):
+            return make_error(err)
+        if err := sanitize_class_name(component_class, "component_class"):
+            return make_error(err)
+        if component_name is not None:
+            if err := sanitize_label(component_name, "component_name"):
+                return make_error(err)
+
         comp_name = component_name or component_class.replace("Component", "")
+        safe_label = _escape_for_fstring(actor_label)
+        safe_cc = _escape_for_fstring(component_class)
+        safe_cn = _escape_for_fstring(comp_name)
         code = f"""
 import unreal, json
 
@@ -78,18 +109,18 @@ subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 actors = subsystem.get_all_level_actors()
 actor = None
 for a in actors:
-    if a.get_actor_label() == "{actor_label}":
+    if a.get_actor_label() == "{safe_label}":
         actor = a
         break
 
 if actor is None:
-    print("RESULT:" + json.dumps({{"error": "Actor not found: {actor_label}"}}))
+    print("RESULT:" + json.dumps({{"error": "Actor not found: {safe_label}"}}))
 else:
-    comp_class = getattr(unreal, "{component_class}", None)
+    comp_class = getattr(unreal, "{safe_cc}", None)
     if comp_class is None:
-        print("RESULT:" + json.dumps({{"error": "Component class not found: {component_class}"}}))
+        print("RESULT:" + json.dumps({{"error": "Component class not found: {safe_cc}"}}))
     else:
-        comp = unreal.new_object(comp_class, actor, "{comp_name}")
+        comp = unreal.new_object(comp_class, actor, "{safe_cn}")
         if comp and actor.root_component:
             comp.k2_attach_to(actor.root_component)
 
@@ -97,8 +128,8 @@ else:
         comp_list = [c.get_class().get_name() for c in comps]
         print("RESULT:" + json.dumps({{
             "actor": actor.get_actor_label(),
-            "added": "{comp_name}",
-            "class": "{component_class}",
+            "added": "{safe_cn}",
+            "class": "{safe_cc}",
             "all_components": comp_list
         }}))
 """
@@ -125,6 +156,22 @@ else:
         value: str,
     ) -> str:
         """Set a property on an actor's component. value is JSON (string, number, object, etc.)."""
+        if err := sanitize_label(actor_label, "actor_label"):
+            return make_error(err)
+        if err := sanitize_class_name(component_class, "component_class"):
+            return make_error(err)
+        if err := sanitize_property_name(property_name):
+            return make_error(err)
+        # Validate value is parseable JSON
+        try:
+            json.loads(value)
+        except json.JSONDecodeError as e:
+            return make_error(f"Invalid JSON value: {e}")
+
+        safe_label = _escape_for_fstring(actor_label)
+        safe_cc = _escape_for_fstring(component_class)
+        safe_prop = _escape_for_fstring(property_name)
+        safe_val = _escape_for_fstring(value)
         code = f"""
 import unreal, json
 
@@ -132,30 +179,30 @@ subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 actors = subsystem.get_all_level_actors()
 actor = None
 for a in actors:
-    if a.get_actor_label() == "{actor_label}":
+    if a.get_actor_label() == "{safe_label}":
         actor = a
         break
 
 if actor is None:
-    print("RESULT:" + json.dumps({{"error": "Actor not found: {actor_label}"}}))
+    print("RESULT:" + json.dumps({{"error": "Actor not found: {safe_label}"}}))
 else:
-    comp_class = getattr(unreal, "{component_class}", None)
+    comp_class = getattr(unreal, "{safe_cc}", None)
     comp = actor.get_component_by_class(comp_class) if comp_class else None
 
     if comp is None:
         comps = actor.get_components_by_class(unreal.ActorComponent)
         available = [c.get_class().get_name() for c in comps]
-        print("RESULT:" + json.dumps({{"error": "Component not found: {component_class}", "available": available}}))
+        print("RESULT:" + json.dumps({{"error": "Component not found: {safe_cc}", "available": available}}))
     else:
-        val = json.loads('''{value}''')
+        val = json.loads('''{safe_val}''')
         # Handle asset path strings
         if isinstance(val, str) and val.startswith("/"):
             asset = unreal.EditorAssetLibrary.load_asset(val)
             if asset:
                 val = asset
         try:
-            comp.set_editor_property("{property_name}", val)
-            print("RESULT:" + json.dumps({{"set": true, "component": "{component_class}", "property": "{property_name}"}}))
+            comp.set_editor_property("{safe_prop}", val)
+            print("RESULT:" + json.dumps({{"set": true, "component": "{safe_cc}", "property": "{safe_prop}"}}))
         except Exception as e:
             print("RESULT:" + json.dumps({{"error": str(e)}}))
 """
@@ -180,15 +227,30 @@ else:
         properties: str,
     ) -> str:
         """Set default values on a Blueprint's CDO. properties is a JSON string of key-value pairs."""
+        if err := sanitize_content_path(blueprint_path, "blueprint_path"):
+            return make_error(err)
+        # Validate properties is valid JSON object
+        try:
+            props = json.loads(properties)
+            if not isinstance(props, dict):
+                return make_error("properties must be a JSON object")
+            for key in props:
+                if err := sanitize_property_name(key, f"property '{key}'"):
+                    return make_error(err)
+        except json.JSONDecodeError as e:
+            return make_error(f"Invalid JSON in properties: {e}")
+
+        safe_bp = _escape_for_fstring(blueprint_path)
+        safe_props = _escape_for_fstring(properties)
         code = f"""
 import unreal, json
 
-bp = unreal.EditorAssetLibrary.load_asset("{blueprint_path}")
+bp = unreal.EditorAssetLibrary.load_asset("{safe_bp}")
 if bp is None:
-    print("RESULT:" + json.dumps({{"error": "Blueprint not found: {blueprint_path}"}}))
+    print("RESULT:" + json.dumps({{"error": "Blueprint not found: {safe_bp}"}}))
 else:
     cdo = unreal.get_default_object(bp.generated_class())
-    props = json.loads('''{properties}''')
+    props = json.loads('''{safe_props}''')
     results = {{}}
     for key, value in props.items():
         try:
@@ -198,8 +260,8 @@ else:
             results[key] = str(e)
 
     unreal.BlueprintEditorLibrary.compile_blueprint(bp)
-    unreal.EditorAssetLibrary.save_asset("{blueprint_path}")
-    print("RESULT:" + json.dumps({{"blueprint": "{blueprint_path}", "properties": results}}))
+    unreal.EditorAssetLibrary.save_asset("{safe_bp}")
+    print("RESULT:" + json.dumps({{"blueprint": "{safe_bp}", "properties": results}}))
 """
         result = await ue.execute_python(code)
         return json.dumps(result, indent=2)
@@ -215,16 +277,20 @@ else:
     )
     async def compile_blueprint(blueprint_path: str) -> str:
         """Compile and save a Blueprint."""
+        if err := sanitize_content_path(blueprint_path, "blueprint_path"):
+            return make_error(err)
+
+        safe_bp = _escape_for_fstring(blueprint_path)
         code = f"""
 import unreal, json
 
-bp = unreal.EditorAssetLibrary.load_asset("{blueprint_path}")
+bp = unreal.EditorAssetLibrary.load_asset("{safe_bp}")
 if bp is None:
-    print("RESULT:" + json.dumps({{"error": "Blueprint not found: {blueprint_path}"}}))
+    print("RESULT:" + json.dumps({{"error": "Blueprint not found: {safe_bp}"}}))
 else:
     unreal.BlueprintEditorLibrary.compile_blueprint(bp)
-    unreal.EditorAssetLibrary.save_asset("{blueprint_path}")
-    print("RESULT:" + json.dumps({{"blueprint": "{blueprint_path}", "compiled": True}}))
+    unreal.EditorAssetLibrary.save_asset("{safe_bp}")
+    print("RESULT:" + json.dumps({{"blueprint": "{safe_bp}", "compiled": True}}))
 """
         result = await ue.execute_python(code)
         return json.dumps(result, indent=2)
@@ -240,6 +306,10 @@ else:
     )
     async def get_actor_components(actor_label: str) -> str:
         """Inspect an actor's component hierarchy by actor label."""
+        if err := sanitize_label(actor_label, "actor_label"):
+            return make_error(err)
+
+        safe_label = _escape_for_fstring(actor_label)
         code = f"""
 import unreal, json
 
@@ -247,12 +317,12 @@ subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 actors = subsystem.get_all_level_actors()
 actor = None
 for a in actors:
-    if a.get_actor_label() == "{actor_label}":
+    if a.get_actor_label() == "{safe_label}":
         actor = a
         break
 
 if actor is None:
-    print("RESULT:" + json.dumps({{"error": "Actor not found: {actor_label}"}}))
+    print("RESULT:" + json.dumps({{"error": "Actor not found: {safe_label}"}}))
 else:
     comps = actor.get_components_by_class(unreal.ActorComponent)
     comp_list = []
@@ -290,13 +360,23 @@ else:
         label: str | None = None,
     ) -> str:
         """Spawn a Blueprint actor instance in the level."""
-        label_line = f'\n    actor.set_actor_label("{label}")' if label else ""
+        if err := sanitize_content_path(blueprint_path, "blueprint_path"):
+            return make_error(err)
+        if label is not None:
+            if err := sanitize_label(label):
+                return make_error(err)
+
+        safe_bp = _escape_for_fstring(blueprint_path)
+        label_line = ""
+        if label:
+            safe_lbl = _escape_for_fstring(label)
+            label_line = f'\n    actor.set_actor_label("{safe_lbl}")'
         code = f"""
 import unreal, json
 
-bp_class = unreal.EditorAssetLibrary.load_blueprint_class("{blueprint_path}")
+bp_class = unreal.EditorAssetLibrary.load_blueprint_class("{safe_bp}")
 if bp_class is None:
-    print("RESULT:" + json.dumps({{"error": "Blueprint not found: {blueprint_path}"}}))
+    print("RESULT:" + json.dumps({{"error": "Blueprint not found: {safe_bp}"}}))
 else:
     subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     actor = subsystem.spawn_actor_from_class(

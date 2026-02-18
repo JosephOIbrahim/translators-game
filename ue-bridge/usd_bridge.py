@@ -88,15 +88,33 @@ def _safe_read(file_path: Path, retries: int = 3, delay: float = 0.05) -> Option
 # CORE USD FUNCTIONS (using pxr when available)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _validate_bridge_path(bridge_path: Optional[Path]) -> Path:
+    """Validate and resolve a bridge path, preventing path traversal.
+
+    All bridge file operations MUST go through this function to ensure
+    files stay within the expected bridge directory.
+    """
+    base_path = (bridge_path or DEFAULT_BRIDGE_PATH).resolve()
+    allowed_root = DEFAULT_BRIDGE_PATH.resolve()
+    try:
+        base_path.relative_to(allowed_root)
+    except ValueError:
+        raise ValueError(
+            f"Bridge path '{base_path}' is outside the allowed directory '{allowed_root}'. "
+            f"Path traversal is not permitted."
+        )
+    return base_path
+
+
 def get_bridge_file_path(bridge_path: Optional[Path] = None) -> Path:
     """Get path to bridge_state.usda."""
-    base_path = bridge_path or DEFAULT_BRIDGE_PATH
+    base_path = _validate_bridge_path(bridge_path)
     return base_path / BRIDGE_STATE_FILE
 
 
 def ensure_bridge_directory(bridge_path: Optional[Path] = None) -> Path:
     """Ensure bridge directory exists."""
-    base_path = bridge_path or DEFAULT_BRIDGE_PATH
+    base_path = _validate_bridge_path(bridge_path)
     base_path.mkdir(parents=True, exist_ok=True)
     return base_path
 

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-PERCEPTION_URL = "http://localhost:30011"
+PERCEPTION_URL = os.environ.get("UE_PERCEPTION_URL", "http://localhost:30011")
 PERCEPTION_TIMEOUT = 5.0
 BRIDGE_DIR = Path.home() / ".translators"
 
@@ -261,7 +261,7 @@ def register(server, ue):
             })
             if result is None:
                 return json.dumps({
-                    "error": "ViewportPerception plugin not reachable on port 30011",
+                    "error": f"ViewportPerception plugin not reachable at {PERCEPTION_URL}",
                     "hint": "Continuous capture requires the C++ plugin. Use ue_viewport_percept for single-shot capture.",
                 }, indent=2)
             return json.dumps(result, indent=2)
@@ -314,7 +314,7 @@ def register(server, ue):
         result = await _perception_request("PUT", "/perception/config", config)
         if result is None:
             return json.dumps({
-                "error": "ViewportPerception plugin not reachable on port 30011",
+                "error": f"ViewportPerception plugin not reachable at {PERCEPTION_URL}",
                 "hint": "Configuration requires the C++ plugin to be running.",
             }, indent=2)
         return json.dumps(result, indent=2)

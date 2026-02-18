@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import json
 
+from ._validation import sanitize_label, sanitize_class_name, make_error
+
+
+def _escape_for_fstring(s: str) -> str:
+    """Escape a string for safe embedding in an f-string Python code template."""
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'").replace("\n", "\\n")
+
 
 def register(server, ue):
     @server.tool(
@@ -17,6 +24,12 @@ def register(server, ue):
     )
     async def find_assets(search_pattern: str, class_filter: str | None = None) -> str:
         """Search for assets. search_pattern matches against asset names (case-insensitive)."""
+        if not search_pattern or len(search_pattern) > 256:
+            return make_error("search_pattern must be 1-256 characters")
+        if class_filter is not None:
+            if err := sanitize_class_name(class_filter, "class_filter"):
+                return make_error(err)
+
         result = await ue.find_assets(search_pattern, class_filter=class_filter)
         return json.dumps(result, indent=2)
 
@@ -38,21 +51,25 @@ def register(server, ue):
         metallic: float = 0.0,
     ) -> str:
         """Create a material instance at /Game/Materials/{name}."""
+        if err := sanitize_label(name, "name"):
+            return make_error(err)
+
+        safe_name = _escape_for_fstring(name)
         code = f"""
 import unreal
 
 # Create material asset
 asset_tools = unreal.AssetToolsHelpers.get_asset_tools()
 factory = unreal.MaterialFactoryNew()
-material = asset_tools.create_asset("{name}", "/Game/Materials", unreal.Material, factory)
+material = asset_tools.create_asset("{safe_name}", "/Game/Materials", unreal.Material, factory)
 
 if material:
     # Set up base color via constant expression
     editor_subsystem = unreal.get_editor_subsystem(unreal.MaterialEditingSubsystem) if hasattr(unreal, 'MaterialEditingSubsystem') else None
 
     # Save the asset
-    unreal.EditorAssetLibrary.save_asset("/Game/Materials/{name}")
-    print("RESULT:CREATED /Game/Materials/{name}")
+    unreal.EditorAssetLibrary.save_asset("/Game/Materials/{safe_name}")
+    print("RESULT:CREATED /Game/Materials/{safe_name}")
 else:
     print("RESULT:FAILED")
 """

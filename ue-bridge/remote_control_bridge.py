@@ -22,10 +22,11 @@ from typing import Any, Optional
 
 import httpx
 
-BASE_URL = "http://localhost:30010"
+BASE_URL = os.environ.get("UE_REMOTE_URL", "http://localhost:30010")
 TIMEOUT = 10.0
 RESULT_POLL_INTERVAL = 0.2  # seconds between result file checks
 RESULT_POLL_TIMEOUT = 10.0  # max seconds to wait for result
+MAX_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MB cap on JSON responses
 
 
 def _make_temp_dir() -> str:
@@ -261,14 +262,27 @@ def _build_exec_payload(script_file: str) -> dict:
     }
 
 
+def _read_result_file(result_file: str) -> dict:
+    """Read and validate a result JSON file with size limits."""
+    file_size = os.path.getsize(result_file)
+    if file_size > MAX_RESPONSE_BYTES:
+        return {
+            "result": None,
+            "output": "",
+            "error": f"Result file too large ({file_size} bytes, max {MAX_RESPONSE_BYTES}). "
+                     f"Reduce output size or use file-based data transfer.",
+        }
+    with open(result_file, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def _poll_result_sync(result_file: str, script_file: str) -> dict:
     """Poll for result file (synchronous)."""
     elapsed = 0.0
     while elapsed < RESULT_POLL_TIMEOUT:
         if os.path.exists(result_file):
             try:
-                with open(result_file, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
+                raw = _read_result_file(result_file)
                 os.remove(result_file)
                 os.remove(script_file)
                 return _parse_result(raw)
@@ -288,8 +302,7 @@ async def _poll_result_async(result_file: str, script_file: str) -> dict:
     while elapsed < RESULT_POLL_TIMEOUT:
         if os.path.exists(result_file):
             try:
-                with open(result_file, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
+                raw = _read_result_file(result_file)
                 os.remove(result_file)
                 os.remove(script_file)
                 return _parse_result(raw)

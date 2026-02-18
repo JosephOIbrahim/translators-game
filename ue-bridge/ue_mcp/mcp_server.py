@@ -56,9 +56,10 @@ async def status() -> str:
             return json.dumps({"connected": True, "info": info}, indent=2)
         except Exception as e:
             return json.dumps({"connected": True, "info_error": str(e)}, indent=2)
+    from remote_control_bridge import BASE_URL
     return json.dumps({
         "connected": False,
-        "message": "UE5 editor not reachable at localhost:30010. Start the editor with RemoteControl plugin enabled.",
+        "message": f"UE5 editor not reachable at {BASE_URL}. Start the editor with RemoteControl plugin enabled.",
     }, indent=2)
 
 

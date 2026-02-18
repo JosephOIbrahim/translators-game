@@ -8,6 +8,13 @@ from __future__ import annotations
 
 import json
 
+from ._validation import sanitize_label, sanitize_content_path, make_error
+
+
+def _escape_for_fstring(s: str) -> str:
+    """Escape a string for safe embedding in an f-string Python code template."""
+    return s.replace("\\", "\\\\").replace('"', '\\"').replace("'", "\\'").replace("\n", "\\n")
+
 
 def register(server, ue):
     @server.tool(
@@ -35,7 +42,16 @@ def register(server, ue):
         label: str | None = None,
     ) -> str:
         """Create a ClonerEffector. layout can be: Grid, Circle, Line, Sphere, Honeycomb, Cylinder."""
-        label_str = label or "ClaudeCloner"
+        valid_layouts = {"Grid", "Circle", "Line", "Sphere", "Honeycomb", "Cylinder"}
+        if layout not in valid_layouts:
+            return make_error(f"Invalid layout '{layout}'. Must be one of: {', '.join(sorted(valid_layouts))}")
+        if err := sanitize_content_path(mesh_path, "mesh_path"):
+            return make_error(err)
+        if label is not None:
+            if err := sanitize_label(label):
+                return make_error(err)
+
+        label_str = _escape_for_fstring(label or "ClaudeCloner")
         code = f"""
 import unreal
 
@@ -84,11 +100,19 @@ else:
         label: str | None = None,
     ) -> str:
         """Spawn a Niagara system. system_asset is an optional content path to a NiagaraSystem asset."""
-        label_str = label or "ClaudeNiagara"
+        if system_asset is not None:
+            if err := sanitize_content_path(system_asset, "system_asset"):
+                return make_error(err)
+        if label is not None:
+            if err := sanitize_label(label):
+                return make_error(err)
+
+        label_str = _escape_for_fstring(label or "ClaudeNiagara")
         asset_line = ""
         if system_asset:
+            safe_asset = _escape_for_fstring(system_asset)
             asset_line = f"""
-    system = unreal.EditorAssetLibrary.load_asset("{system_asset}")
+    system = unreal.EditorAssetLibrary.load_asset("{safe_asset}")
     if system:
         comp = actor.get_component_by_class(unreal.NiagaraComponent)
         if comp:
@@ -135,7 +159,11 @@ else:
         label: str | None = None,
     ) -> str:
         """Create a PCG volume. extent controls the bounds of the procedural generation area."""
-        label_str = label or "ClaudePCG"
+        if label is not None:
+            if err := sanitize_label(label):
+                return make_error(err)
+
+        label_str = _escape_for_fstring(label or "ClaudePCG")
         code = f"""
 import unreal
 
