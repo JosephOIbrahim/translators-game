@@ -36,12 +36,10 @@ public class TranslatorsCard : ModuleRules
             "JsonUtilities"
         });
 
-        // File watching (Editor-only - use polling in packaged builds)
+        // Editor-only features
+        // DirectoryWatcher migrated to TranslatorsBridgeEditor plugin module (Phase 3).
         if (Target.bBuildEditor)
         {
-            PrivateDependencyModuleNames.Add("DirectoryWatcher");
-            PrivateDefinitions.Add("WITH_DIRECTORY_WATCHER=1");
-
             // USD Stage Actor support (editor-only)
             // Note: USDA text parsing works without this module
             // This is only needed for live USD Stage manipulation

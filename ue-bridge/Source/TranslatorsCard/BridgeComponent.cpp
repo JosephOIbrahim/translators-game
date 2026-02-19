@@ -13,11 +13,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Internationalization/Regex.h"
 
-// Directory watcher (editor-only)
-#if WITH_DIRECTORY_WATCHER
-#include "DirectoryWatcherModule.h"
-#include "IDirectoryWatcher.h"
-#endif
+// DirectoryWatcher logic lives in BridgeEditorSubsystem (editor-only plugin).
+// This runtime component always uses polling for file change detection.
 
 
 UBridgeComponent::UBridgeComponent()
@@ -155,90 +152,25 @@ void UBridgeComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActo
 
 void UBridgeComponent::SetupFileWatcher()
 {
-#if WITH_DIRECTORY_WATCHER
-    FDirectoryWatcherModule& DirWatcherModule =
-        FModuleManager::LoadModuleChecked<FDirectoryWatcherModule>(TEXT("DirectoryWatcher"));
-    IDirectoryWatcher* DirWatcher = DirWatcherModule.Get();
-
-    if (!DirWatcher)
-    {
-        BridgeLog(TEXT("ERROR: Could not get DirectoryWatcher module"));
-        return;
-    }
-
-    IDirectoryWatcher::FDirectoryChanged Callback =
-        IDirectoryWatcher::FDirectoryChanged::CreateUObject(
-            this, &UBridgeComponent::OnDirectoryChanged);
-
-    uint32 WatchFlags = 0; // No special flags needed
-
-    bool bSuccess = DirWatcher->RegisterDirectoryChangedCallback_Handle(
-        BridgePath, Callback, WatchHandle, WatchFlags);
-
-    if (bSuccess)
-    {
-        BridgeLog(FString::Printf(TEXT("File watcher registered for: %s"), *BridgePath));
-    }
-    else
-    {
-        BridgeLog(TEXT("ERROR: Failed to register file watcher"));
-    }
-#else
-    // Non-editor: Use polling in TickComponent
-    BridgeLog(TEXT("DirectoryWatcher not available - using file polling"));
+    // Runtime component always uses polling.
+    // In editor builds, BridgeEditorSubsystem handles IDirectoryWatcher
+    // and broadcasts file changes via OnBridgeFileChanged delegate.
+    BridgeLog(TEXT("Using file polling for state change detection"));
     bUsePolling = true;
-#endif
 }
 
 
 void UBridgeComponent::TeardownFileWatcher()
 {
-#if WITH_DIRECTORY_WATCHER
-    if (WatchHandle.IsValid())
-    {
-        FDirectoryWatcherModule& DirWatcherModule =
-            FModuleManager::LoadModuleChecked<FDirectoryWatcherModule>(TEXT("DirectoryWatcher"));
-        IDirectoryWatcher* DirWatcher = DirWatcherModule.Get();
-
-        if (DirWatcher)
-        {
-            DirWatcher->UnregisterDirectoryChangedCallback_Handle(BridgePath, WatchHandle);
-            BridgeLog(TEXT("File watcher unregistered"));
-        }
-    }
-#endif
+    // Polling cleanup — nothing to unregister.
+    // DirectoryWatcher lifecycle is managed by BridgeEditorSubsystem.
+    bUsePolling = false;
 }
 
 
-#if WITH_DIRECTORY_WATCHER
-void UBridgeComponent::OnDirectoryChanged(const TArray<FFileChangeData>& Changes)
-{
-    for (const FFileChangeData& Change : Changes)
-    {
-        if (bVerboseLogging)
-        {
-            BridgeLog(FString::Printf(TEXT("File changed: %s"), *Change.Filename));
-        }
-
-        // State file changes (JSON or USD bridge state)
-        if (Change.Filename.EndsWith(TEXT("state.json")) ||
-            Change.Filename.EndsWith(TEXT("bridge_state.usda")))
-        {
-            // Debounce state file changes
-            TimeSinceLastStateChange = 0.0f;
-            bStateChangePending = true;
-        }
-        // USD cognitive profile changes (separate from bridge state)
-        else if (Change.Filename.EndsWith(TEXT("cognitive_profile.usda")) ||
-                 Change.Filename.EndsWith(TEXT("cognitive_substrate.usda")))
-        {
-            // Debounce USD profile file changes
-            TimeSinceLastUsdChange = 0.0f;
-            bUsdChangePending = true;
-        }
-    }
-}
-#endif
+// OnDirectoryChanged removed — migrated to BridgeEditorSubsystem (Phase 3).
+// The subsystem broadcasts FOnBridgeFileChanged; BridgeComponent subscribes
+// via NotifyFileChanged() when running in editor builds.
 
 
 // === STATE HANDLING ===

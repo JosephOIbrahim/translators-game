@@ -1,31 +1,37 @@
 // BridgeComponent.h
-// Claude Code → UE5.7 File-Based Bridge
+// Claude Code <-> UE5 File-Based Bridge
 // Part of "The Translators" cognitive profiling game
 //
 // This component watches ~/.translators/ for file changes and handles:
-// - state.json: Questions from Claude Code
-// - answer.json: User responses back to Claude
-// - cognitive_substrate.usda: USD cognitive profile
+// - bridge_state.usda: USD-native communication (v2.0.0)
+// - state.json / answer.json: JSON fallback (v1.0.0)
+// - cognitive_profile.usda: Exported cognitive profile
 //
-// CRITICAL: USD Stage Actor does NOT auto-reload files.
-// We must trigger SetRootLayer() manually on file change.
+// Data types (structs, enums, delegates) live in BridgeTypes.h
+// and are shared between Runtime and Editor modules.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Dom/JsonObject.h"
+
+// Shared types from the TranslatorsBridge plugin
+// During migration: types are defined in both BridgeTypes.h (plugin) and here (legacy).
+// Once the C++ module rename is complete, only BridgeTypes.h will be canonical.
+// For now, we keep the original definitions below for compilation compatibility.
+
 #include "BridgeComponent.generated.h"
 
-// Forward declare for editor-only directory watcher
-#if WITH_DIRECTORY_WATCHER
-struct FFileChangeData;
-#endif
+// DirectoryWatcher is now editor-only (BridgeEditorSubsystem).
+// This runtime component uses polling for file change detection.
 
-// Note: USD Stage Actor integration is handled via Blueprint
-// The OnUsdUpdated delegate notifies when cognitive_substrate.usda changes
+// ============================================================================
+// Legacy delegates (v1.0.0 — raw JSON payloads)
+// These will be replaced by typed delegates from BridgeTypes.h in Phase 4.
+// ============================================================================
 
-// Delegate for question received from Claude Code
+// Delegate for question received from Claude Code (raw JSON)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestionReceived, const FString&, QuestionJson);
 
 // Delegate for transition command
@@ -40,82 +46,92 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnUsdUpdated);
 // Delegate for ready state
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBridgeReady, int32, TotalQuestions);
 
-// Structured question data for Blueprints
+// ============================================================================
+// Data types — will migrate to BridgeTypes.h in Phase 4 (subsystem creation)
+// ============================================================================
+
+/** Structured question data for Blueprints */
 USTRUCT(BlueprintType)
 struct FTranslatorsQuestion
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "0-based question index"))
     int32 Index = 0;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Total questions in the set"))
     int32 Total = 0;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Unique question ID"))
     FString QuestionId;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Question display text"))
     FString Text;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Scene identifier"))
     FString Scene;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Answer option display labels"))
     TArray<FString> OptionLabels;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Option direction values"))
     TArray<FString> OptionDirections;
 
     /** Depth tier label: SURFACE, PATTERNS, FEELINGS, CORE */
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Depth tier label"))
     FString DepthLabel;
+
+    bool IsValid() const { return Total > 0 && !QuestionId.IsEmpty(); }
 };
 
 
-// Cognitive profile trait (from profile USDA)
+/** Cognitive profile trait (from profile USDA) */
 USTRUCT(BlueprintType)
 struct FTranslatorsTrait
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
-    FString Dimension;    // e.g. "cognitive_density"
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Dimension identifier"))
+    FString Dimension;
 
-    UPROPERTY(BlueprintReadOnly)
-    FString Label;        // e.g. "Balanced"
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Human-readable label"))
+    FString Label;
 
-    UPROPERTY(BlueprintReadOnly)
-    float Score = 0.0f;   // 0.0 - 1.0
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Normalized score 0.0 - 1.0"))
+    float Score = 0.0f;
 
-    UPROPERTY(BlueprintReadOnly)
-    FString Behavior;     // e.g. "You can hold moderate complexity"
+    UPROPERTY(BlueprintReadOnly, Category = "Translators", meta = (ToolTip = "Behavioral description"))
+    FString Behavior;
 };
 
 
-// Full cognitive profile result
+/** Full cognitive profile result */
 USTRUCT(BlueprintType)
 struct FTranslatorsProfile
 {
     GENERATED_BODY()
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators")
     TArray<FTranslatorsTrait> Traits;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators")
     TArray<FString> Insights;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators")
     FString Checksum;
 
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, Category = "Translators")
     FString Anchor;
 
     bool IsValid() const { return Traits.Num() > 0; }
 };
 
 
-UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
+// ============================================================================
+// Component
+// ============================================================================
+
+UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent, DisplayName="Translators Bridge", ToolTip="File-based bridge between UE5 and the Python cognitive profiling orchestrator"))
 class TRANSLATORSCARD_API UBridgeComponent : public UActorComponent
 {
     GENERATED_BODY()
@@ -130,75 +146,75 @@ public:
     // === DELEGATES (Bind in Blueprint) ===
 
     /** Fired when a new question arrives from Claude Code */
-    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge")
+    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge", meta = (ToolTip = "Fires when a new question arrives"))
     FOnQuestionReceived OnQuestionReceived;
 
     /** Fired when Claude Code sends transition command */
-    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge")
+    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge", meta = (ToolTip = "Fires on scene transitions"))
     FOnTransitionReceived OnTransitionReceived;
 
     /** Fired when questionnaire completes */
-    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge")
+    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge", meta = (ToolTip = "Fires when profile is complete"))
     FOnFinaleReceived OnFinaleReceived;
 
     /** Fired when cognitive_substrate.usda updates */
-    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge")
+    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge", meta = (ToolTip = "Fires when USD profile file changes"))
     FOnUsdUpdated OnUsdUpdated;
 
     /** Fired when Claude Code is ready to start */
-    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge")
+    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge", meta = (ToolTip = "Fires when Python bridge connects"))
     FOnBridgeReady OnBridgeReady;
 
     // === BLUEPRINT CALLABLE FUNCTIONS ===
 
-    /** Send acknowledgment that UE5 is ready */
-    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    /** Send acknowledgment that UE5 is ready (JSON mode) */
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge", meta = (ToolTip = "Send JSON acknowledgment to Python bridge", DeprecatedFunction, DeprecationMessage = "Use SendAcknowledgeUsda for USD mode (v2.0.0)"))
     void SendAcknowledge();
 
-    /** Send user's answer to Claude Code */
-    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    /** Send user's answer to Claude Code (JSON mode) */
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge", meta = (ToolTip = "Send answer via JSON", DeprecatedFunction, DeprecationMessage = "Use SendAnswerUsda for USD mode (v2.0.0)"))
     void SendAnswer(const FString& QuestionId, int32 OptionIndex, float ResponseTimeMs);
 
     /** Parse current question into structured data */
-    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge", meta = (ToolTip = "Get the currently active question"))
     FTranslatorsQuestion GetCurrentQuestion() const;
 
     /** Force reload the USD stage (use if auto-detection fails) */
-    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge", meta = (ToolTip = "Force USD Stage Actor to reload"))
     void ForceReloadUsdStage();
 
     /** Parse cognitive profile from exported USDA file */
-    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge", meta = (ToolTip = "Parse a cognitive profile from a .usda file"))
     FTranslatorsProfile ParseCognitiveProfile(const FString& UsdPath);
 
     /** Check if bridge is connected */
-    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge", meta = (ToolTip = "True if Python bridge is connected"))
     bool IsBridgeConnected() const { return bIsConnected; }
 
     /** Check if using USD mode (v2.0.0) */
-    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge", meta = (ToolTip = "True if using USD-native transport"))
     bool IsUsingUsdMode() const { return bUsingUsdMode; }
 
     /** Send acknowledgment via USD (v2.0.0) */
-    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge", meta = (ToolTip = "Send USD acknowledgment to Python bridge"))
     void SendAcknowledgeUsda();
 
     /** Send answer via USD (v2.0.0) */
-    UFUNCTION(BlueprintCallable, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, Category = "Translators Bridge", meta = (ToolTip = "Send answer via USD-native transport"))
     void SendAnswerUsda(const FString& QuestionId, int32 OptionIndex, float ResponseTimeMs);
 
     // === CONFIGURATION ===
 
     /** Bridge directory path (default: ~/.translators) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators Bridge")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators Bridge", meta = (ToolTip = "Path to the bridge exchange directory"))
     FString BridgePath;
 
     /** Enable verbose logging */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators Bridge")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators Bridge", meta = (ToolTip = "Show detailed bridge logs on screen"))
     bool bVerboseLogging = false;
 
     /** Debounce time in seconds for file change detection */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators Bridge")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators Bridge", meta = (ToolTip = "Debounce window for file watcher events", ClampMin = "0.01", ClampMax = "1.0"))
     float DebounceTime = 0.05f;
 
 private:
@@ -206,10 +222,6 @@ private:
 
     void SetupFileWatcher();
     void TeardownFileWatcher();
-
-#if WITH_DIRECTORY_WATCHER
-    void OnDirectoryChanged(const TArray<FFileChangeData>& Changes);
-#endif
 
     // === STATE HANDLING ===
 
@@ -249,13 +261,9 @@ private:
 
     // === STATE ===
 
-#if WITH_DIRECTORY_WATCHER
-    FDelegateHandle WatchHandle;
-#endif
-
     bool bIsConnected = false;
     bool bUsePolling = false;
-    bool bUsingUsdMode = false;  // v2.0.0: USD-native mode active
+    bool bUsingUsdMode = false;
 
     // Debouncing
     float TimeSinceLastStateChange = 0.0f;
@@ -272,11 +280,9 @@ private:
     FString CurrentStateJson;
     FTranslatorsQuestion CurrentQuestion;
 
-    // === BEHAVIORAL SIGNALS (v2.0.0 ADHD_MoE routing) ===
+    // === BEHAVIORAL SIGNALS (ADHD_MoE routing) ===
 
-    TArray<float> ResponseTimes;  // Track response times for pattern detection
-    int32 HesitationCount = 0;    // Count of long hesitations (>10s)
-    int32 RapidClickCount = 0;    // Count of rapid clicks (<500ms)
-    int32 SkipCount = 0;          // Count of skipped questions
-    int32 BackNavigationCount = 0; // Count of back navigations
+    TArray<float> ResponseTimes;
+    int32 HesitationCount = 0;
+    int32 RapidClickCount = 0;
 };
