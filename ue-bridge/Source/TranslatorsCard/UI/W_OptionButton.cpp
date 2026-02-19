@@ -184,7 +184,7 @@ void UW_OptionButton::BuildWidgetTree()
 
     // Create label text
     OptionLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("OptionLabel"));
-    OptionLabel->SetText(LabelText.IsEmpty() ? FText::FromString(TEXT("Option")) : LabelText);
+    OptionLabel->SetText(LabelText.IsEmpty() ? NSLOCTEXT("TranslatorsBridge", "OptionButton.Default", "Option") : LabelText);
     OptionLabel->SetColorAndOpacity(FSlateColor(TextColor));
     OptionLabel->SetJustification(ETextJustify::Center);
     OptionLabel->SetAutoWrapText(true);

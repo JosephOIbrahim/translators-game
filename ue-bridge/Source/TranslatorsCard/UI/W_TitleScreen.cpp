@@ -124,7 +124,7 @@ void UW_TitleScreen::BuildWidgetTree()
 
     // === Title: "The Translators" ===
     TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TitleText"));
-    TitleText->SetText(FText::FromString(TEXT("The Translators")));
+    TitleText->SetText(NSLOCTEXT("TranslatorsBridge", "TitleScreen.Title", "The Translators"));
     TitleText->SetColorAndOpacity(FSlateColor(TitleColor));
     TitleText->SetJustification(ETextJustify::Center);
     TitleText->SetFont(MakeFont(56));
@@ -138,7 +138,7 @@ void UW_TitleScreen::BuildWidgetTree()
 
     // === Subtitle: "A cognitive profiling experience" ===
     SubtitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("SubtitleText"));
-    SubtitleText->SetText(FText::FromString(TEXT("A cognitive profiling experience")));
+    SubtitleText->SetText(NSLOCTEXT("TranslatorsBridge", "TitleScreen.Subtitle", "A cognitive profiling experience"));
     SubtitleText->SetColorAndOpacity(FSlateColor(SubtitleColor));
     SubtitleText->SetJustification(ETextJustify::Center);
     SubtitleText->SetFont(MakeFont(18));
@@ -152,7 +152,7 @@ void UW_TitleScreen::BuildWidgetTree()
 
     // === Prompt: "Press ENTER to begin" ===
     PromptText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("PromptText"));
-    PromptText->SetText(FText::FromString(TEXT("Press ENTER to begin")));
+    PromptText->SetText(NSLOCTEXT("TranslatorsBridge", "TitleScreen.Prompt", "Press ENTER to begin"));
     PromptText->SetColorAndOpacity(FSlateColor(PromptColor));
     PromptText->SetJustification(ETextJustify::Center);
     PromptText->SetFont(MakeFont(16));

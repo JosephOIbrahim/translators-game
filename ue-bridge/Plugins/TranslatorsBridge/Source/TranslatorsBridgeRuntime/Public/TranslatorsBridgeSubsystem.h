@@ -61,27 +61,27 @@ public:
     // === ACCESSORS ===
 
     /** Get the current bridge state */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge", meta = (ToolTip = "Get the current bridge state machine state"))
     ETranslatorsBridgeState GetBridgeState() const { return CurrentState; }
 
     /** Get the currently active question */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge", meta = (ToolTip = "Get the currently active question data"))
     FTranslatorsQuestion GetCurrentQuestion() const { return CurrentQuestion; }
 
     /** Get accumulated behavioral signals */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge", meta = (ToolTip = "Get accumulated behavioral signals for MoE routing"))
     FBehavioralSignals GetBehavioralSignals() const { return Signals; }
 
     /** Check if bridge is connected to the Python side */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge", meta = (ToolTip = "True if bridge is connected to the Python backend"))
     bool IsBridgeConnected() const { return CurrentState != ETranslatorsBridgeState::Idle && CurrentState != ETranslatorsBridgeState::Error; }
 
     /** Check if using USD mode (v2.0.0) */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge", meta = (ToolTip = "True if using USD-native transport mode"))
     bool IsUsingUsdMode() const { return bUsingUsdMode; }
 
     /** Get the bridge exchange directory path */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge", meta = (ToolTip = "Get the bridge exchange directory path"))
     FString GetBridgePath() const { return BridgePath; }
 
     // === DELEGATES ===

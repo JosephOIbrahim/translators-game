@@ -6,6 +6,9 @@
 #include "TranslatorsBridgeRuntime.h"
 #include "DirectoryWatcherModule.h"
 #include "IDirectoryWatcher.h"
+#include "HAL/PlatformProcess.h"
+#include "Misc/Paths.h"
+#include "HAL/FileManager.h"
 
 void UBridgeEditorSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -117,10 +120,58 @@ void UBridgeEditorSubsystem::StartBridgeProcess()
         return;
     }
 
-    // TODO: Launch bridge_orchestrator.py via IPythonScriptPlugin or FPlatformProcess::CreateProc()
-    // For now this is a stub — the artist launches the bridge externally via
-    // Launch-TranslatorsBridge.ps1 or manually running bridge_orchestrator.py.
-    UE_LOG(LogTranslatorsBridge, Log, TEXT("StartBridgeProcess: external launch required (Launch-TranslatorsBridge.ps1)"));
+    // Locate bridge_orchestrator.py — project Scripts/ dir first, then user home fallback
+    FString ScriptPath = FPaths::Combine(FPaths::ProjectDir(), TEXT("Scripts"), TEXT("bridge_orchestrator.py"));
+    if (!IFileManager::Get().FileExists(*ScriptPath))
+    {
+        FString UserHome = FPlatformMisc::GetEnvironmentVariable(TEXT("USERPROFILE"));
+        ScriptPath = FPaths::Combine(UserHome, TEXT(".translators"), TEXT("bridge_orchestrator.py"));
+    }
+
+    if (!IFileManager::Get().FileExists(*ScriptPath))
+    {
+        UE_LOG(LogTranslatorsBridge, Warning,
+            TEXT("Bridge script not found. Looked in ProjectDir/Scripts/ and %%USERPROFILE%%/.translators/. "
+                 "Use Launch-TranslatorsBridge.ps1 for manual launch."));
+        return;
+    }
+
+    // Resolve Python executable
+    const TCHAR* PythonExe = TEXT("python");
+
+    // Build command-line arguments (just the script path)
+    FString Args = FString::Printf(TEXT("\"%s\""), *ScriptPath);
+
+    // Launch the process
+    const bool bLaunchDetached = true;
+    const bool bLaunchHidden = true;
+    const bool bLaunchReallyHidden = false;
+    constexpr int32 PriorityModifier = 0;
+    const TCHAR* WorkingDir = nullptr;
+
+    BridgeProcessHandle = FPlatformProcess::CreateProc(
+        PythonExe,
+        *Args,
+        bLaunchDetached,
+        bLaunchHidden,
+        bLaunchReallyHidden,
+        &BridgeProcId,
+        PriorityModifier,
+        WorkingDir,
+        nullptr  // PipeWriteChild
+    );
+
+    if (BridgeProcessHandle.IsValid())
+    {
+        bBridgeProcessRunning = true;
+        UE_LOG(LogTranslatorsBridge, Log,
+            TEXT("Bridge process launched (PID %u): %s"), BridgeProcId, *ScriptPath);
+    }
+    else
+    {
+        UE_LOG(LogTranslatorsBridge, Error,
+            TEXT("Failed to launch bridge process. Ensure 'python' is on PATH. Script: %s"), *ScriptPath);
+    }
 }
 
 void UBridgeEditorSubsystem::StopBridgeProcess()
@@ -130,12 +181,36 @@ void UBridgeEditorSubsystem::StopBridgeProcess()
         return;
     }
 
-    // TODO: Terminate the Python bridge process cleanly
-    UE_LOG(LogTranslatorsBridge, Log, TEXT("StopBridgeProcess: stub"));
+    if (BridgeProcessHandle.IsValid() && FPlatformProcess::IsProcRunning(BridgeProcessHandle))
+    {
+        // Terminate with kill-tree enabled so child processes also stop
+        FPlatformProcess::TerminateProc(BridgeProcessHandle, /* bKillTree */ true);
+        UE_LOG(LogTranslatorsBridge, Log, TEXT("Bridge process terminated (PID %u)"), BridgeProcId);
+    }
+
+    FPlatformProcess::CloseProc(BridgeProcessHandle);
+    BridgeProcId = 0;
     bBridgeProcessRunning = false;
 }
 
 bool UBridgeEditorSubsystem::IsBridgeProcessRunning() const
 {
-    return bBridgeProcessRunning;
+    if (!bBridgeProcessRunning)
+    {
+        return false;
+    }
+
+    // Live check — if the process exited on its own, update our flag
+    if (BridgeProcessHandle.IsValid() && !FPlatformProcess::IsProcRunning(BridgeProcessHandle))
+    {
+        // Process died externally; clean up state (mutable cast for bookkeeping)
+        UBridgeEditorSubsystem* MutableThis = const_cast<UBridgeEditorSubsystem*>(this);
+        FPlatformProcess::CloseProc(MutableThis->BridgeProcessHandle);
+        MutableThis->BridgeProcId = 0;
+        MutableThis->bBridgeProcessRunning = false;
+        UE_LOG(LogTranslatorsBridge, Warning, TEXT("Bridge process (PID %u) exited unexpectedly"), BridgeProcId);
+        return false;
+    }
+
+    return true;
 }

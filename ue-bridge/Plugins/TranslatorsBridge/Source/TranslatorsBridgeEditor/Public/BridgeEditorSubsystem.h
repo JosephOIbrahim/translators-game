@@ -40,7 +40,7 @@ public:
     void StopWatching();
 
     /** Fired when a file changes in the watched bridge directory */
-    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge|Editor")
+    UPROPERTY(BlueprintAssignable, Category = "Translators Bridge|Editor", meta = (ToolTip = "Fires when a file changes in the bridge directory"))
     FOnBridgeFileChanged OnBridgeFileChanged;
 
     // === PYTHON PROCESS ===
@@ -54,7 +54,7 @@ public:
     void StopBridgeProcess();
 
     /** Check if the Python bridge process is running */
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge|Editor")
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Translators Bridge|Editor", meta = (ToolTip = "True if bridge_orchestrator.py is running"))
     bool IsBridgeProcessRunning() const;
 
 private:
@@ -67,5 +67,6 @@ private:
 
     // Python process handle
     FProcHandle BridgeProcessHandle;
+    uint32 BridgeProcId = 0;
     bool bBridgeProcessRunning = false;
 };

@@ -3,15 +3,15 @@
 	"Version": 1,
 	"VersionName": "2.1.0",
 	"FriendlyName": "Translators Bridge",
-	"Description": "Cognitive profiling game bridge between UE5 and the Python/MCP orchestration layer. Provides BridgeComponent for USD profile exchange, question delivery, and behavioral signal routing.",
-	"Category": "AI Integration",
-	"CreatedBy": "UE-Bridge",
+	"Description": "Connects Unreal Engine to The Translators cognitive profiling game via file-based bridge protocol with USD export support. Provides runtime components for question delivery, behavioral signal collection, and deterministic profile generation.",
+	"Category": "Gameplay",
+	"CreatedBy": "Joseph Ibrahim",
 	"CreatedByURL": "",
 	"DocsURL": "",
 	"MarketplaceURL": "",
 	"SupportURL": "",
 	"CanContainContent": true,
-	"IsBetaVersion": false,
+	"IsBetaVersion": true,
 	"IsExperimentalVersion": false,
 	"EnabledByDefault": false,
 	"SupportedTargetPlatforms": ["Win64"],
@@ -24,7 +24,7 @@
 		{
 			"Name": "TranslatorsBridgeEditor",
 			"Type": "Editor",
-			"LoadingPhase": "PostEngineInit"
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [

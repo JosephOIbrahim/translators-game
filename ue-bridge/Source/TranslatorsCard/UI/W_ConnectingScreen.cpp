@@ -67,7 +67,7 @@ void UW_ConnectingScreen::BuildWidgetTree()
 
     // Centered text
     StatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StatusText"));
-    StatusText->SetText(FText::FromString(TEXT("Connecting to Claude Code...")));
+    StatusText->SetText(NSLOCTEXT("TranslatorsBridge", "ConnectingScreen.Status", "Connecting to Claude Code..."));
     StatusText->SetColorAndOpacity(FSlateColor(TextColor));
     StatusText->SetJustification(ETextJustify::Center);
     StatusText->SetFont(FSlateFontInfo(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), 24));

@@ -105,7 +105,7 @@ void UW_QuestionDisplay::BuildWidgetTree()
 
     // Depth label (top - e.g. "SURFACE", "PATTERNS", etc.)
     DepthText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("DepthText"));
-    DepthText->SetText(FText::FromString(TEXT("SURFACE")));
+    DepthText->SetText(NSLOCTEXT("TranslatorsBridge", "QuestionDisplay.DefaultDepth", "SURFACE"));
     DepthText->SetColorAndOpacity(FSlateColor(DepthLabelColor));
     DepthText->SetJustification(ETextJustify::Center);
 
@@ -120,7 +120,7 @@ void UW_QuestionDisplay::BuildWidgetTree()
 
     // Progress text
     ProgressText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ProgressText"));
-    ProgressText->SetText(FText::FromString(TEXT("1 / 8")));
+    ProgressText->SetText(NSLOCTEXT("TranslatorsBridge", "QuestionDisplay.DefaultProgress", "1 / 8"));
     ProgressText->SetColorAndOpacity(FSlateColor(ProgressTextColor));
     ProgressText->SetJustification(ETextJustify::Center);
 
@@ -135,7 +135,7 @@ void UW_QuestionDisplay::BuildWidgetTree()
 
     // Question text (center)
     QuestionText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("QuestionText"));
-    QuestionText->SetText(FText::FromString(TEXT("Loading question...")));
+    QuestionText->SetText(NSLOCTEXT("TranslatorsBridge", "QuestionDisplay.Loading", "Loading question..."));
     QuestionText->SetColorAndOpacity(FSlateColor(QuestionTextColor));
     QuestionText->SetJustification(ETextJustify::Center);
     QuestionText->SetAutoWrapText(true);

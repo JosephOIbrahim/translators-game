@@ -263,7 +263,7 @@ void UW_FinaleScreen::BuildWidgetTree()
 
     // === Title: "Your Cognitive Profile" ===
     TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TitleText"));
-    TitleText->SetText(FText::FromString(TEXT("Your Cognitive Profile")));
+    TitleText->SetText(NSLOCTEXT("TranslatorsBridge", "FinaleScreen.Title", "Your Cognitive Profile"));
     TitleText->SetColorAndOpacity(FSlateColor(TitleColor));
     TitleText->SetJustification(ETextJustify::Center);
 
@@ -278,7 +278,7 @@ void UW_FinaleScreen::BuildWidgetTree()
 
     // === Subtitle ===
     SubtitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("SubtitleText"));
-    SubtitleText->SetText(FText::FromString(TEXT("Your cognitive profile has been generated.")));
+    SubtitleText->SetText(NSLOCTEXT("TranslatorsBridge", "FinaleScreen.Subtitle", "Your cognitive profile has been generated."));
     SubtitleText->SetColorAndOpacity(FSlateColor(SubtitleColor));
     SubtitleText->SetJustification(ETextJustify::Center);
 
@@ -293,7 +293,7 @@ void UW_FinaleScreen::BuildWidgetTree()
 
     // === Traits section header ===
     UTextBlock* TraitsHeader = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TraitsHeader"));
-    TraitsHeader->SetText(FText::FromString(TEXT("DIMENSIONS")));
+    TraitsHeader->SetText(NSLOCTEXT("TranslatorsBridge", "FinaleScreen.DimensionsHeader", "DIMENSIONS"));
     TraitsHeader->SetColorAndOpacity(FSlateColor(DimColor));
 
     TraitsHeader->SetFont(MakeFont(12));
@@ -315,7 +315,7 @@ void UW_FinaleScreen::BuildWidgetTree()
 
     // === Insights section header ===
     UTextBlock* InsightsHeader = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("InsightsHeader"));
-    InsightsHeader->SetText(FText::FromString(TEXT("INSIGHTS")));
+    InsightsHeader->SetText(NSLOCTEXT("TranslatorsBridge", "FinaleScreen.InsightsHeader", "INSIGHTS"));
     InsightsHeader->SetColorAndOpacity(FSlateColor(DimColor));
 
     InsightsHeader->SetFont(MakeFont(12));
