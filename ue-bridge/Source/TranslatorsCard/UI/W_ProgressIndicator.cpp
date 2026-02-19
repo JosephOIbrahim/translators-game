@@ -11,6 +11,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Blueprint/WidgetTree.h"
+#include "TranslatorsStyle.h"
 
 
 UW_ProgressIndicator::UW_ProgressIndicator(const FObjectInitializer& ObjectInitializer)
@@ -20,9 +21,9 @@ UW_ProgressIndicator::UW_ProgressIndicator(const FObjectInitializer& ObjectIniti
     CurrentQuestion = 0;
 
     // 8-bit color scheme
-    CompletedColor = FLinearColor(0.36f, 1.0f, 0.86f, 1.0f);  // Cyan (#5cffdb)
-    IncompleteColor = FLinearColor(0.3f, 0.3f, 0.3f, 0.5f);   // Dim gray
-    CurrentColor = FLinearColor(1.0f, 0.8f, 0.2f, 1.0f);      // Gold
+    CompletedColor = FTranslatorsStyle::GetColor("Color.Cyan");
+    IncompleteColor = FTranslatorsStyle::GetColor("Color.IncompleteGray");
+    CurrentColor = FTranslatorsStyle::GetColor("Color.Gold");
 }
 
 

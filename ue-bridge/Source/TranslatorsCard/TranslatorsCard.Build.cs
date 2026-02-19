@@ -44,7 +44,8 @@ public class TranslatorsCard : ModuleRules
         {
             "Slate",
             "SlateCore",
-            "UMG"
+            "UMG",
+            "EnhancedInput"
         });
 
         // Enable IWYU (Include What You Use)

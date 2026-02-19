@@ -9,17 +9,17 @@
 #include "Components/Border.h"
 #include "Components/SizeBox.h"
 #include "Blueprint/WidgetTree.h"
-#include "Misc/Paths.h"
+#include "TranslatorsStyle.h"
 
 
 UW_OptionButton::UW_OptionButton(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
     // Default 8-bit color scheme
-    NormalColor = FLinearColor(0.1f, 0.1f, 0.15f, 1.0f);      // Dark blue-gray
-    HoveredColor = FLinearColor(0.2f, 0.4f, 0.5f, 1.0f);      // Teal
-    PressedColor = FLinearColor(0.36f, 1.0f, 0.86f, 1.0f);    // Cyan (matches PALETTE.glowCyan)
-    TextColor = FLinearColor(0.9f, 0.9f, 0.9f, 1.0f);         // Off-white
+    NormalColor = FTranslatorsStyle::GetColor("Color.ButtonNormal");
+    HoveredColor = FTranslatorsStyle::GetColor("Color.ButtonHovered");
+    PressedColor = FTranslatorsStyle::GetColor("Color.Cyan");
+    TextColor = FTranslatorsStyle::GetColor("Color.TextPrimary");
 }
 
 
@@ -189,7 +189,7 @@ void UW_OptionButton::BuildWidgetTree()
     OptionLabel->SetJustification(ETextJustify::Center);
     OptionLabel->SetAutoWrapText(true);
 
-    OptionLabel->SetFont(FSlateFontInfo(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), 18));
+    OptionLabel->SetFont(FTranslatorsStyle::GetFont("Font.Option"));
 
     OptionButton->AddChild(OptionLabel);
 

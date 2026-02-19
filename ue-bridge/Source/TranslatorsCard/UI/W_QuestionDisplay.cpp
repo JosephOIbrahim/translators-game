@@ -13,24 +13,16 @@
 #include "Components/Border.h"
 #include "Components/SizeBox.h"
 #include "Blueprint/WidgetTree.h"
-#include "Misc/Paths.h"
-
-namespace
-{
-    FSlateFontInfo MakeFont(int32 Size)
-    {
-        return FSlateFontInfo(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), Size);
-    }
-}
+#include "TranslatorsStyle.h"
 
 
 UW_QuestionDisplay::UW_QuestionDisplay(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
     // 8-bit color scheme
-    BackgroundColor = FLinearColor(0.02f, 0.02f, 0.05f, 0.95f);
-    QuestionTextColor = FLinearColor(0.36f, 1.0f, 0.86f, 1.0f);  // Cyan
-    ProgressTextColor = FLinearColor(0.5f, 0.5f, 0.6f, 1.0f);
+    BackgroundColor = FTranslatorsStyle::GetColor("Color.Background");
+    QuestionTextColor = FTranslatorsStyle::GetColor("Color.Cyan");
+    ProgressTextColor = FTranslatorsStyle::GetColor("Color.TextDim");
 }
 
 
@@ -109,7 +101,7 @@ void UW_QuestionDisplay::BuildWidgetTree()
     DepthText->SetColorAndOpacity(FSlateColor(DepthLabelColor));
     DepthText->SetJustification(ETextJustify::Center);
 
-    DepthText->SetFont(MakeFont(12));
+    DepthText->SetFont(FTranslatorsStyle::GetFont("Font.Caption"));
 
     UVerticalBoxSlot* DepthSlot = ContentBox->AddChildToVerticalBox(DepthText);
     if (DepthSlot)
@@ -124,7 +116,7 @@ void UW_QuestionDisplay::BuildWidgetTree()
     ProgressText->SetColorAndOpacity(FSlateColor(ProgressTextColor));
     ProgressText->SetJustification(ETextJustify::Center);
 
-    ProgressText->SetFont(MakeFont(14));
+    ProgressText->SetFont(FTranslatorsStyle::GetFont("Font.Progress"));
 
     UVerticalBoxSlot* ProgressSlot = ContentBox->AddChildToVerticalBox(ProgressText);
     if (ProgressSlot)
@@ -140,7 +132,7 @@ void UW_QuestionDisplay::BuildWidgetTree()
     QuestionText->SetJustification(ETextJustify::Center);
     QuestionText->SetAutoWrapText(true);
 
-    QuestionText->SetFont(MakeFont(24));
+    QuestionText->SetFont(FTranslatorsStyle::GetFont("Font.Question"));
 
     UVerticalBoxSlot* QuestionSlot = ContentBox->AddChildToVerticalBox(QuestionText);
     if (QuestionSlot)
@@ -175,19 +167,19 @@ void UW_QuestionDisplay::ShowQuestion(const FTranslatorsQuestion& Question)
         FLinearColor TierColor;
         if (Question.DepthLabel == TEXT("SURFACE"))
         {
-            TierColor = FLinearColor(0.5f, 0.8f, 0.5f, 1.0f);  // Sage green
+            TierColor = FTranslatorsStyle::GetColor("Color.DepthSurface");
         }
         else if (Question.DepthLabel == TEXT("PATTERNS"))
         {
-            TierColor = FLinearColor(0.3f, 0.8f, 0.8f, 1.0f);  // Teal
+            TierColor = FTranslatorsStyle::GetColor("Color.DepthPatterns");
         }
         else if (Question.DepthLabel == TEXT("FEELINGS"))
         {
-            TierColor = FLinearColor(1.0f, 0.5f, 0.45f, 1.0f);  // Coral
+            TierColor = FTranslatorsStyle::GetColor("Color.DepthFeelings");
         }
         else // CORE
         {
-            TierColor = FLinearColor(1.0f, 0.85f, 0.3f, 1.0f);  // Gold
+            TierColor = FTranslatorsStyle::GetColor("Color.DepthCore");
         }
         DepthText->SetColorAndOpacity(FSlateColor(TierColor));
     }

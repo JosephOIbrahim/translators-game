@@ -7,15 +7,15 @@
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
 #include "Blueprint/WidgetTree.h"
-#include "Misc/Paths.h"
+#include "TranslatorsStyle.h"
 
 
 UW_ConnectingScreen::UW_ConnectingScreen(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
     // 8-bit color scheme
-    BackgroundColor = FLinearColor(0.02f, 0.02f, 0.05f, 0.98f);
-    TextColor = FLinearColor(0.5f, 0.5f, 0.6f, 1.0f);
+    BackgroundColor = FTranslatorsStyle::GetColor("Color.Background");
+    TextColor = FTranslatorsStyle::GetColor("Color.TextDim");
 }
 
 
@@ -70,7 +70,7 @@ void UW_ConnectingScreen::BuildWidgetTree()
     StatusText->SetText(NSLOCTEXT("TranslatorsBridge", "ConnectingScreen.Status", "Connecting to Claude Code..."));
     StatusText->SetColorAndOpacity(FSlateColor(TextColor));
     StatusText->SetJustification(ETextJustify::Center);
-    StatusText->SetFont(FSlateFontInfo(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), 24));
+    StatusText->SetFont(FTranslatorsStyle::GetFont("Font.Question"));
     BackgroundBorder->AddChild(StatusText);
 
     UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_ConnectingScreen] Built programmatic widget tree (Border root)"));

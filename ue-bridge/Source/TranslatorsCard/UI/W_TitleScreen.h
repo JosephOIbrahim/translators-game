@@ -11,6 +11,8 @@
 class UTextBlock;
 class UBorder;
 class UVerticalBox;
+class UInputAction;
+struct FInputActionValue;
 
 // Delegate fired when user presses Enter to start
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnStartRequested);
@@ -53,6 +55,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators|Style")
     FLinearColor PromptColor = FLinearColor(0.36f, 1.0f, 0.86f, 0.8f);
 
+    // === INPUT ===
+
+    /** Optional Enhanced Input action for starting the game. If set, binds to Enhanced Input system. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Translators|Input")
+    TObjectPtr<UInputAction> StartInputAction;
+
     // Build widget tree BEFORE Slate hierarchy is constructed
     virtual TSharedRef<SWidget> RebuildWidget() override;
 
@@ -75,6 +83,9 @@ protected:
 
 private:
     void BuildWidgetTree();
+
+    /** Handle Enhanced Input start action */
+    void HandleStartAction(const FInputActionValue& Value);
 
     /** Elapsed time for pulsing animation */
     float PulseTimer = 0.0f;

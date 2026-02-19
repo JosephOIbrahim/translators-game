@@ -11,24 +11,21 @@
 #include "Components/Spacer.h"
 #include "Blueprint/WidgetTree.h"
 #include "Misc/Paths.h"
-
-namespace
-{
-    FSlateFontInfo MakeFont(int32 Size)
-    {
-        return FSlateFontInfo(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), Size);
-    }
-}
+#include "EnhancedInputComponent.h"
+#include "TranslatorsStyle.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputAction.h"
+#include "InputActionValue.h"
 
 
 UW_TitleScreen::UW_TitleScreen(const FObjectInitializer& ObjectInitializer)
     : Super(ObjectInitializer)
 {
     // Dark background matching the game aesthetic
-    BackgroundColor = FLinearColor(0.02f, 0.02f, 0.05f, 1.0f);
-    TitleColor = FLinearColor(0.36f, 1.0f, 0.86f, 1.0f);  // Cyan #5cffdb
-    SubtitleColor = FLinearColor(0.5f, 0.5f, 0.6f, 1.0f);
-    PromptColor = FLinearColor(0.36f, 1.0f, 0.86f, 0.8f);
+    BackgroundColor = FTranslatorsStyle::GetColor("Color.BackgroundSolid");
+    TitleColor = FTranslatorsStyle::GetColor("Color.Cyan");
+    SubtitleColor = FTranslatorsStyle::GetColor("Color.TextDim");
+    PromptColor = FTranslatorsStyle::GetColor("Color.CyanDim");
 
     // Widget must be focusable to receive key events
     SetIsFocusable(true);
@@ -70,6 +67,19 @@ void UW_TitleScreen::NativeConstruct()
     // Request keyboard focus so we can receive Enter key
     SetKeyboardFocus();
 
+    // Optionally bind Enhanced Input action (if configured by designer)
+    if (StartInputAction)
+    {
+        if (APlayerController* PC = GetOwningPlayer())
+        {
+            if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PC->InputComponent))
+            {
+                EIC->BindAction(StartInputAction, ETriggerEvent::Started, this, &UW_TitleScreen::HandleStartAction);
+                UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_TitleScreen] Bound StartInputAction via Enhanced Input"));
+            }
+        }
+    }
+
     UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_TitleScreen] Constructed (Programmatic UI)"));
 }
 
@@ -107,6 +117,17 @@ FReply UW_TitleScreen::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEv
 }
 
 
+void UW_TitleScreen::HandleStartAction(const FInputActionValue& Value)
+{
+    if (!bStartRequested)
+    {
+        bStartRequested = true;
+        UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_TitleScreen] Start requested via Enhanced Input!"));
+        OnStartRequested.Broadcast();
+    }
+}
+
+
 void UW_TitleScreen::BuildWidgetTree()
 {
     // Simple structure: Border (root, fills viewport) -> centered VerticalBox -> TextBlocks
@@ -127,7 +148,7 @@ void UW_TitleScreen::BuildWidgetTree()
     TitleText->SetText(NSLOCTEXT("TranslatorsBridge", "TitleScreen.Title", "The Translators"));
     TitleText->SetColorAndOpacity(FSlateColor(TitleColor));
     TitleText->SetJustification(ETextJustify::Center);
-    TitleText->SetFont(MakeFont(56));
+    TitleText->SetFont(FTranslatorsStyle::GetFont("Font.Title"));
 
     UVerticalBoxSlot* TitleSlot = ContentBox->AddChildToVerticalBox(TitleText);
     if (TitleSlot)
@@ -141,7 +162,7 @@ void UW_TitleScreen::BuildWidgetTree()
     SubtitleText->SetText(NSLOCTEXT("TranslatorsBridge", "TitleScreen.Subtitle", "A cognitive profiling experience"));
     SubtitleText->SetColorAndOpacity(FSlateColor(SubtitleColor));
     SubtitleText->SetJustification(ETextJustify::Center);
-    SubtitleText->SetFont(MakeFont(18));
+    SubtitleText->SetFont(FTranslatorsStyle::GetFont("Font.Subtitle"));
 
     UVerticalBoxSlot* SubtitleSlot = ContentBox->AddChildToVerticalBox(SubtitleText);
     if (SubtitleSlot)
@@ -155,7 +176,7 @@ void UW_TitleScreen::BuildWidgetTree()
     PromptText->SetText(NSLOCTEXT("TranslatorsBridge", "TitleScreen.Prompt", "Press ENTER to begin"));
     PromptText->SetColorAndOpacity(FSlateColor(PromptColor));
     PromptText->SetJustification(ETextJustify::Center);
-    PromptText->SetFont(MakeFont(16));
+    PromptText->SetFont(FTranslatorsStyle::GetFont("Font.Body"));
 
     UVerticalBoxSlot* PromptSlot = ContentBox->AddChildToVerticalBox(PromptText);
     if (PromptSlot)
