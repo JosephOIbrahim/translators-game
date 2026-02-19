@@ -443,7 +443,7 @@ void UBridgeComponent::SendAcknowledge()
 
     TSharedPtr<FJsonObject> AckObj = MakeShared<FJsonObject>();
     AckObj->SetBoolField(TEXT("ready"), true);
-    AckObj->SetStringField(TEXT("ue_version"), TEXT("5.7.2"));
+    AckObj->SetStringField(TEXT("ue_version"), FString(ENGINE_VERSION_STRING));
     AckObj->SetStringField(TEXT("project"), TEXT("TranslatorsCard"));
     JsonObj->SetObjectField(TEXT("ack"), AckObj);
 
@@ -518,12 +518,14 @@ void UBridgeComponent::BridgeLog(const FString& Message) const
 {
     UE_LOG(LogTemp, Log, TEXT("[TranslatorsBridge] %s"), *Message);
 
-    // Also log to console for Blueprint visibility
-    if (GEngine)
+#if !UE_BUILD_SHIPPING
+    // On-screen debug overlay — stripped from shipping builds
+    if (bVerboseLogging && GEngine)
     {
         GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan,
             FString::Printf(TEXT("[Bridge] %s"), *Message));
     }
+#endif
 }
 
 
@@ -877,11 +879,8 @@ FString UBridgeComponent::UpdateUsdaAttribute(const FString& Content, const FStr
 
 void UBridgeComponent::UpdateBehavioralSignals(FString& Content, float ResponseTimeMs)
 {
-    // ═══════════════════════════════════════════════════════════════════════════════
-    // THINKINGMACHINES [He2025] BATCH-INVARIANCE COMPLIANT
-    // Same signals → Same routing → Same behavior
-    // FIXED thresholds ensure deterministic expert selection regardless of load
-    // ═══════════════════════════════════════════════════════════════════════════════
+    // Deterministic behavioral signal routing.
+    // Fixed thresholds ensure same signals produce same expert selection.
 
     // PHASE 1: DETECT - Collect signals
     ResponseTimes.Add(ResponseTimeMs);
@@ -1022,7 +1021,7 @@ void UBridgeComponent::SendAcknowledgeUsda()
 
     // Update Ack prim
     Content = UpdateUsdaAttribute(Content, TEXT("Ack"), TEXT("ready"), TEXT("true"), false);
-    Content = UpdateUsdaAttribute(Content, TEXT("Ack"), TEXT("ue_version"), TEXT("5.7.2"), true);
+    Content = UpdateUsdaAttribute(Content, TEXT("Ack"), TEXT("ue_version"), FString(ENGINE_VERSION_STRING), true);
     Content = UpdateUsdaAttribute(Content, TEXT("Ack"), TEXT("project"), TEXT("TranslatorsCard"), true);
     Content = UpdateUsdaAttribute(Content, TEXT("Ack"), TEXT("timestamp"), Timestamp, true);
 

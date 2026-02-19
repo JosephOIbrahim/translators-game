@@ -1,8 +1,8 @@
 {
 	"FileVersion": 3,
 	"EngineAssociation": "5.7",
-	"Category": "",
-	"Description": "The Translators Card - Cognitive profiling game with Claude Code integration",
+	"Category": "Games",
+	"Description": "The Translators - Cognitive profiling game with Claude Code integration and USD profile export",
 	"Modules": [
 		{
 			"Name": "TranslatorsCard",
@@ -15,29 +15,39 @@
 	],
 	"Plugins": [
 		{
-			"Name": "USDImporter",
+			"Name": "TranslatorsBridge",
 			"Enabled": true
+		},
+		{
+			"Name": "USDImporter",
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "PythonScriptPlugin",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "Paper2D",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "ModelingToolsEditorMode",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "SkyCreatorPlugin",
 			"Enabled": true,
+			"Optional": true,
 			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/content/b9aa540db8c54f7d928c61d3b30cb955"
 		},
 		{
 			"Name": "RemoteControl",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "WebSocketNetworking",
@@ -45,11 +55,13 @@
 		},
 		{
 			"Name": "EditorScriptingUtilities",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "Avalanche",
 			"Enabled": true,
+			"Optional": true,
 			"SupportedTargetPlatforms": [
 				"Win64",
 				"Linux",
@@ -58,7 +70,8 @@
 		},
 		{
 			"Name": "ClonerEffector",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "Niagara",
@@ -66,42 +79,51 @@
 		},
 		{
 			"Name": "PCG",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "SequencerAnimTools",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "ViewportPerception",
 			"Enabled": true,
+			"Optional": true,
 			"SupportedTargetPlatforms": [
 				"Win64"
 			]
 		},
 		{
 			"Name": "NiagaraNanite",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "NiagaraFluids",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "NiagaraMRQ",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "PythonFoundationPackages",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "PythonMLPackages",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		},
 		{
 			"Name": "PythonAutomationTest",
-			"Enabled": true
+			"Enabled": true,
+			"Optional": true
 		}
 	],
 	"TargetPlatforms": [

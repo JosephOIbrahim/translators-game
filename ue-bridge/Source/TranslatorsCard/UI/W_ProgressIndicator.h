@@ -18,9 +18,7 @@
  * - 8 dots/boxes (filled for completed, empty for remaining)
  * - Text like "3/8 COMPLETE"
  *
- * ThinkingMachines Compliance:
- * - FIXED 8 indicator slots
- * - Deterministic visual state
+ * Deterministic: fixed 8 indicator slots, predictable visual state.
  */
 UCLASS(Blueprintable, BlueprintType)
 class TRANSLATORSCARD_API UW_ProgressIndicator : public UUserWidget

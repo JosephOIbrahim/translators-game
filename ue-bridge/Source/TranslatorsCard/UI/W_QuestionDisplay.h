@@ -26,10 +26,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAnswerSelected, int32, OptionInde
  * - Progress indicator (1/8)
  * - Option buttons (dynamically created)
  *
- * ThinkingMachines Compliance:
- * - FIXED widget structure
- * - Deterministic option button creation
- * - Same input → same visual output
+ * Deterministic: fixed widget structure, same input produces same visual output.
  */
 UCLASS(Blueprintable, BlueprintType)
 class TRANSLATORSCARD_API UW_QuestionDisplay : public UUserWidget

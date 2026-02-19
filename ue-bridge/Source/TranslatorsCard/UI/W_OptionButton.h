@@ -22,9 +22,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnOptionClicked, int32, OptionIndex
  * - Keyboard focusable (accessibility)
  * - Fires delegate with option index when clicked
  *
- * ThinkingMachines Compliance:
- * - FIXED visual states (normal, hovered, pressed)
- * - Deterministic click → delegate flow
+ * Deterministic: fixed visual states and click-to-delegate flow.
  */
 UCLASS(Blueprintable, BlueprintType)
 class TRANSLATORSCARD_API UW_OptionButton : public UUserWidget
