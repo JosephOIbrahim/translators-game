@@ -6,7 +6,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "../BridgeComponent.h"
+#include "BridgeTypes.h"
 #include "W_FinaleScreen.generated.h"
 
 class UTextBlock;

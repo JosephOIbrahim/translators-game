@@ -1,16 +1,9 @@
 // TranslatorsCard.Build.cs
-// Build configuration for Claude Code → UE5.7 Bridge v2.0.0
+// Build configuration for the TranslatorsCard game module.
 //
-// v2.0.0 Changes:
-// - USD-native communication via text-based USDA parsing
-// - Behavioral signals for ADHD_MoE expert routing
-// - JSON fallback for backward compatibility
-//
-// Key modules:
-// - DirectoryWatcher: For file change detection
-// - Json/JsonUtilities: For protocol message handling
-// - Regex: For USDA text parsing
-// - USDImporter: Optional, for USD Stage Actor integration (editor-only)
+// Phase 4: Game flow logic migrated to TranslatorsBridgeRuntime plugin.
+// This module now depends on the plugin for BridgeTypes.h and the subsystem.
+// BridgeComponent is a thin relay to UTranslatorsBridgeSubsystem.
 
 using UnrealBuildTool;
 
@@ -29,12 +22,8 @@ public class TranslatorsCard : ModuleRules
             "InputCore"
         });
 
-        // JSON handling for protocol messages (v1.0.0 fallback)
-        PublicDependencyModuleNames.AddRange(new string[]
-        {
-            "Json",
-            "JsonUtilities"
-        });
+        // TranslatorsBridge plugin — subsystem, BridgeTypes, delegates
+        PublicDependencyModuleNames.Add("TranslatorsBridgeRuntime");
 
         // Editor-only features
         // DirectoryWatcher migrated to TranslatorsBridgeEditor plugin module (Phase 3).
@@ -61,8 +50,8 @@ public class TranslatorsCard : ModuleRules
         // Enable IWYU (Include What You Use)
         IWYUSupport = IWYUSupport.Full;
 
-        // v2.0.0: Bridge version definition
-        PrivateDefinitions.Add("BRIDGE_VERSION=TEXT(\"2.0.0\")");
+        // Bridge version (matches plugin — defined in TranslatorsBridgeRuntime.Build.cs)
+        // Kept here for legacy references; canonical version is BRIDGE_VERSION from the plugin.
 
         // Ensure generated headers are available
         PublicIncludePaths.Add(ModuleDirectory);

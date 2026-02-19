@@ -9,7 +9,7 @@
 #include "Components/VerticalBox.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
-#include "../BridgeComponent.h"
+#include "BridgeTypes.h"
 #include "W_QuestionDisplay.generated.h"
 
 // Forward declaration
