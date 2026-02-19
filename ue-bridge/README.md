@@ -1,364 +1,265 @@
-# CC↔UE5 Bridge v2.0.0
+# Translators Bridge
 
-**USD Cognitive Substrate Integration with ThinkingMachines [He2025] Batch-Invariance Compliance**
+**An Unreal Engine plugin that connects your game to The Translators -- a cognitive profiling experience where personality emerges from play, not questionnaires.**
 
-A bidirectional communication bridge between Claude Code and Unreal Engine 5.7+ using USD (Universal Scene Description) composition semantics for cognitive state management.
-
----
-
-## The Novel Thesis
-
-**USD composition semantics (LIVRPS) can describe cognitive state, not just 3D scenes.**
-
-Pixar invented USD to resolve conflicting opinions in complex 3D pipelines. We repurpose these semantics for cognitive state management in LLM-game engine integration:
-
-| USD Concept | Cognitive Mapping |
-|-------------|-------------------|
-| Scene graph | Cognitive architecture |
-| Prim attributes | Behavioral parameters |
-| Composition arcs | Priority resolution (emotional > mode > domain > task) |
-| VariantSets | State machine (sync_status, message_type) |
-| Layers | Cognitive subsystems |
+Players answer eight questions. Their choices, timing, and hesitation patterns generate a deterministic cognitive profile exportable as USD. The same answers always produce the same profile.
 
 ---
 
-## Architecture
+## What's In the Box
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     USD-NATIVE BRIDGE (v2.0.0)                               │
-│                                                                              │
-│   ~/.translators/                                                            │
-│   └── bridge_state.usda    ← Single file, bidirectional, USD VariantSets   │
-│                                                                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   CLAUDE CODE                           UNREAL ENGINE 5.7+                   │
-│   ───────────                           ─────────────────                    │
-│   usd_bridge.py                         BridgeComponent.cpp                  │
-│   - write_question_usda()               - ProcessBridgeStateUsda()           │
-│   - read_answer_usda()                  - SendAnswerUsda()                   │
-│   - set_variant()                       - UpdateBehavioralSignals()          │
-│   - write_finale_usda()                 - ADHD_MoE expert routing            │
-│                                                                              │
-│   bridge_orchestrator.py                                                     │
-│   - Question sequencing                                                      │
-│   - Profile generation                                                       │
-│   - Checksum computation                                                     │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Fallback Mode
-
-If USD is unavailable, the bridge falls back to JSON protocol (v1.0.0):
-- `state.json` - Claude writes, UE5 reads
-- `answer.json` - UE5 writes, Claude reads
-
----
-
-## ThinkingMachines [He2025] Compliance
-
-Per [Defeating Nondeterminism in LLM Inference](https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/):
-
-> "The primary reason nearly all LLM inference endpoints are nondeterministic is that the load (and thus batch-size) nondeterministically varies."
-
-### Batch-Invariance Guarantees
-
-| Requirement | Implementation |
-|-------------|----------------|
-| **Fixed reduction order** | 5-phase execution: DETECT → CASCADE → LOCK → EXECUTE → UPDATE |
-| **Consistent processing** | FIXED thresholds (10000ms hesitation, 500ms rapid click) |
-| **Fixed split-size** | FIXED expert priority (first match wins, no reordering) |
-| **Same input → Same output** | DJB2 checksum with sorted keys |
-
-### 5-Phase Execution Protocol
-
-```
-1. DETECT    → PRISM extracts signals (emotional, mode, domain, task)
-2. CASCADE   → ADHD_MoE routes via FIXED priority
-3. LOCK      → Parameters locked before generation
-4. EXECUTE   → Generate response with locked params
-5. UPDATE    → Update session state, compute convergence
-```
-
-### ADHD_MoE Expert Routing (FIXED Priority)
-
-First match wins - NEVER skip or reorder:
-
-| Priority | Expert | Triggers | Response |
-|----------|--------|----------|----------|
-| 1 | **Validator** | frustrated, RED burnout, rapid clicks >3 | Empathy first, normalize |
-| 2 | **Scaffolder** | stuck, overwhelmed, hesitations >2 | Break down, reduce scope |
-| 3 | **Restorer** | depleted, ORANGE burnout | Easy wins, rest is OK |
-| 4 | **Refocuser** | distracted, tangent signals | Gentle redirect |
-| 5 | **Celebrator** | completing milestone | Acknowledge win |
-| 6 | **Socratic** | exploring, thoughtful pace | Guide discovery |
-| 7 | **Direct** | focused, flow state | Stay out of way (DEFAULT) |
-
-### Burnout Level Detection
-
-| Level | Signals | Expert Route |
-|-------|---------|--------------|
-| GREEN | Normal pace, clear requests | Direct |
-| YELLOW | Slow responses, mild hesitation | Direct + checkpoint |
-| ORANGE | Frustration signals, high avg response time | Restorer |
-| RED | Rapid clicking, extreme frustration | Validator |
-
----
-
-## [EXEC:...] Anchor Format
-
-Every profile includes a ThinkingMachines-compliant anchor encoding routing parameters:
-
-```
-[EXEC:{checksum}|{expert}|{paradigm}|{altitude}|{verbosity}|{think_depth}]
-```
-
-**Example:**
-```
-[EXEC:40d7a7a4|Scaffolder|Cortex|5000ft|standard|standard]
-```
-
-This enables:
-1. **Reproducibility verification** - Same checksum = same profile
-2. **Routing traceability** - Know which expert handled the response
-3. **Debugging** - Full parameter state captured
-
----
-
-## USD Protocol Reference
-
-### bridge_state.usda Structure
-
-```usda
-def Xform "BridgeState" (
-    variants = {
-        string sync_status = "question_pending"  # State machine
-        string message_type = "question"         # Message type
-    }
-    prepend variantSets = ["sync_status", "message_type"]
-)
-{
-    # State machine variants
-    variantSet "sync_status" = {
-        "idle" { }
-        "question_pending" { double timeout_seconds = 300.0 }
-        "answer_received" { }
-        "transition" { }
-        "complete" { }
-        "error" { string error_message = "" }
-    }
-
-    # Message payload
-    def Xform "Message" {
-        string type = "question"
-        int index = 0
-        int total = 8
-        string question_id = "load"
-        string text = "When working on a complex problem..."
-    }
-
-    # User's answer
-    def Xform "Answer" {
-        string question_id = ""
-        int option_index = -1
-        double response_time_ms = 0.0
-    }
-
-    # Behavioral signals for ADHD_MoE routing
-    def Xform "BehavioralSignals" {
-        double last_response_time_ms = 0.0
-        int hesitation_count = 0
-        int rapid_click_count = 0
-        string detected_state = "focused"
-        string recommended_expert = "Direct"
-        string burnout_level = "GREEN"
-        string momentum_phase = "rolling"
-    }
-}
-```
-
-### VariantSet State Machine
-
-| sync_status | message_type | Meaning |
-|-------------|--------------|---------|
-| `idle` | `ready` | Bridge initialized, waiting for start |
-| `question_pending` | `question` | Question displayed, waiting for answer |
-| `answer_received` | `answer` | User answered, Claude processing |
-| `transition` | `transition` | Scene transition in progress |
-| `complete` | `finale` | All questions answered, profile ready |
-| `error` | `*` | Error state with message |
+| Component | What It Does |
+|-----------|-------------|
+| **TranslatorsBridge plugin** | Drop-in UE plugin with Runtime + Editor modules |
+| **Question delivery system** | Presents questions, collects answers, tracks behavioral signals |
+| **Profile engine** | Generates deterministic cognitive profiles from player responses |
+| **USD export** | Profiles export as `.usda` files for pipeline integration |
+| **Full UI kit** | Title screen, question display, option buttons, progress indicator, finale screen |
 
 ---
 
 ## Quick Start
 
-### 1. Test Without UE5
+### 1. Enable the Plugin
+
+1. Copy `Plugins/TranslatorsBridge/` into your project's `Plugins/` folder
+2. Open your project in Unreal Editor
+3. Go to **Edit > Plugins**, search for "Translators Bridge", and enable it
+4. Restart the editor when prompted
+
+### 2. Add the Bridge to Your Level
+
+**Option A: Blueprint (recommended)**
+
+1. Create a new Actor Blueprint
+2. Add a **Bridge Component** to it
+3. Place the actor in your level
+4. In the Details panel, bind the events you need:
+
+| Event | When It Fires |
+|-------|--------------|
+| `On Bridge Ready` | Connection established, ready to start |
+| `On Question Received` | A new question is ready to display |
+| `On Transition Received` | Moving between questions |
+| `On Finale Received` | All questions answered, profile ready |
+
+**Option B: C++ Subsystem (advanced)**
+
+The plugin provides `UTranslatorsBridgeSubsystem` -- a GameInstance subsystem you can access from anywhere:
+
+```cpp
+#include "TranslatorsBridgeSubsystem.h"
+
+UTranslatorsBridgeSubsystem* Bridge = GetGameInstance()->GetSubsystem<UTranslatorsBridgeSubsystem>();
+Bridge->StartGame();
+```
+
+### 3. Start the Python Backend
+
+In a terminal, from the project root:
 
 ```bash
-# Terminal 1: Start orchestrator
-cd ue-bridge
 python bridge_orchestrator.py
-
-# Terminal 2: Simulate UE5
-python test_bridge_roundtrip.py
 ```
 
-### 2. UE5 Integration
+The bridge communicates through files in `~/.translators/`. No network configuration needed.
 
-1. Copy `Source/TranslatorsCard/` to your UE5.7+ project
-2. Add `BridgeComponent` to an Actor in your level
-3. Bind Blueprint events:
-   - `OnBridgeReady` - Bridge connected
-   - `OnQuestionReceived` - Display question UI
-   - `OnTransitionReceived` - Handle scene transition
-   - `OnFinaleReceived` - Show completion screen
-4. Call `SendAcknowledgeUsda()` when ready
-5. Call `SendAnswerUsda(QuestionId, OptionIndex, ResponseTimeMs)` on user selection
+---
 
-### 3. Python API
+## How It Works
 
-```python
-from usd_bridge import (
-    write_question_usda,
-    read_answer_usda,
-    set_variant,
-    compute_checksum,
-    generate_exec_anchor,
-    get_expert_from_signals
-)
+```
+  Python Backend                    Unreal Engine
+  ──────────────                    ──────────────
+  bridge_orchestrator.py     ←→     TranslatorsBridge Plugin
+         │                                  │
+    Writes questions           Reads questions, shows UI
+    to ~/.translators/         Writes answers back
+         │                                  │
+    Reads answers              Tracks response time,
+    Generates profile          hesitation, click patterns
+         │                                  │
+    Exports .usda              Displays cognitive profile
+```
 
-# Write a question
-write_question_usda(
-    question_id="load",
-    text="When working on a complex problem, do you prefer to...",
-    options=[
-        {"label": "Break it into pieces", "direction": "low"},
-        {"label": "See the full picture", "direction": "high"},
-        {"label": "Jump between both", "direction": "mid"}
-    ],
-    index=0,
-    total=8
-)
+The bridge uses plain files -- no sockets, no ports, no network setup. It just works.
 
-# Read answer (returns None if not ready)
-answer = read_answer_usda()
-if answer:
-    print(f"Selected: {answer['option_index']}")
-    print(f"Response time: {answer['response_time_ms']}ms")
+---
 
-# Generate deterministic checksum
-checksum = compute_checksum({"load": 7, "ground": 5, "horizon": 8})
-# Returns: "40d7a7a4" (always same for same input)
+## The UI Widgets
 
-# Generate EXEC anchor
-anchor = generate_exec_anchor(checksum, expert="Scaffolder")
-# Returns: "[EXEC:40d7a7a4|Scaffolder|Cortex|Ground|standard|standard]"
+All widgets are fully programmatic -- no Blueprint assets required. They build themselves in C++ and render with The Translators' signature dark-cyan aesthetic.
+
+| Widget | Purpose |
+|--------|---------|
+| `W_TitleScreen` | "The Translators" title with pulsing "Press ENTER to begin" prompt |
+| `W_ConnectingScreen` | "Connecting to Claude Code..." status display |
+| `W_QuestionDisplay` | Question text + answer buttons + depth tier label + progress |
+| `W_OptionButton` | Individual answer button with hover/press states |
+| `W_ProgressIndicator` | 8-dot progress bar (cyan = done, gold = current, gray = remaining) |
+| `W_FinaleScreen` | Full cognitive profile display with traits, scores, and insights |
+
+### Customizing the Look
+
+Every color and font comes from `FTranslatorsStyle` -- a registered Slate style set. To override colors without touching code:
+
+**In Blueprint:** Each widget exposes style properties (Background Color, Text Color, etc.) in the Details panel under **Translators | Style**.
+
+**In C++:** Override the style set:
+
+```cpp
+#include "TranslatorsStyle.h"
+
+// Get any named color
+FLinearColor Cyan = FTranslatorsStyle::GetColor("Color.Cyan");
+
+// Get any named font
+FSlateFontInfo TitleFont = FTranslatorsStyle::GetFont("Font.Title");
+```
+
+### Color Palette
+
+| Token | Color | Used For |
+|-------|-------|----------|
+| `Color.Cyan` | ![#5cffdb](https://via.placeholder.com/12/5cffdb/5cffdb.png) `#5cffdb` | Titles, accents, completed progress |
+| `Color.Gold` | ![#ffcc33](https://via.placeholder.com/12/ffcc33/ffcc33.png) `#ffcc33` | Current progress indicator |
+| `Color.Background` | Near-black | All screen backgrounds |
+| `Color.TextPrimary` | Off-white | Body text |
+| `Color.TextDim` | Mid-gray | Subtitles, secondary info |
+
+### Font Scale
+
+| Token | Size | Used For |
+|-------|------|----------|
+| `Font.Title` | 56 | Title screen heading |
+| `Font.Heading` | 36 | Finale screen heading |
+| `Font.Question` | 24 | Question text |
+| `Font.Subtitle` | 18 | Subtitles |
+| `Font.Body` | 16 | General text |
+| `Font.Caption` | 12 | Labels, headers |
+
+All fonts use `FCoreStyle` defaults -- DPI-aware, no hardcoded font files.
+
+---
+
+## Input
+
+The title screen accepts **Enter** or **Space** to start. It also supports **Enhanced Input** -- assign a `UInputAction` to the `StartInputAction` property in the Details panel if your project uses the Enhanced Input system.
+
+Answer buttons are mouse/touch clickable with hover and press feedback.
+
+---
+
+## The Cognitive Profile
+
+After eight questions, the engine generates a profile like this:
+
+```
+DIMENSIONS
+───────────────────────────────
+cognitive_load       Synthesizer    72%
+  Prefers to integrate multiple perspectives
+
+decision_making      Adaptive       65%
+  Shifts approach based on context
+
+communication        Direct         80%
+  Values clarity and conciseness
+
+INSIGHTS
+───────────────────────────────
+  Gravitates toward systematic decomposition
+  Responds well to structured frameworks
+  Shows high tolerance for ambiguity
+
+[TRANSLATORS:101bfab5]
+```
+
+The checksum at the bottom is deterministic -- same answers always produce the same hash. This is how you verify profile integrity.
+
+---
+
+## Project Structure
+
+```
+Plugins/TranslatorsBridge/
+├── TranslatorsBridge.uplugin          # Plugin descriptor
+├── Resources/Icon128.png              # Plugin icon
+├── Content/Widgets/                   # Widget assets
+└── Source/
+    ├── TranslatorsBridgeRuntime/      # Ships in packaged builds
+    │   ├── Public/
+    │   │   ├── BridgeTypes.h          # Shared types (questions, profiles, signals)
+    │   │   ├── TranslatorsBridgeSubsystem.h  # Main game flow subsystem
+    │   │   └── TranslatorsStyle.h     # Slate style system
+    │   └── Private/
+    │       ├── TranslatorsBridgeSubsystem.cpp
+    │       └── TranslatorsStyle.cpp
+    └── TranslatorsBridgeEditor/       # Editor-only (file watching, process management)
+        ├── Public/
+        │   └── BridgeEditorSubsystem.h
+        └── Private/
+            └── BridgeEditorSubsystem.cpp
+
+Source/TranslatorsCard/                # Game module (thin relay to plugin)
+├── BridgeComponent.h/cpp             # Legacy component (forwards to subsystem)
+└── UI/
+    ├── W_TitleScreen.h/cpp
+    ├── W_ConnectingScreen.h/cpp
+    ├── W_QuestionDisplay.h/cpp
+    ├── W_OptionButton.h/cpp
+    ├── W_ProgressIndicator.h/cpp
+    ├── W_FinaleScreen.h/cpp
+    └── TranslatorsHUD.h/cpp
 ```
 
 ---
 
-## Files
+## Blueprint API Reference
 
-### Python (Claude Code Side)
+### Bridge Component
 
-| File | Purpose |
-|------|---------|
-| `usd_bridge.py` | Core USD read/write functions, ThinkingMachines compliance |
-| `bridge_orchestrator.py` | Question sequencing, profile generation |
-| `test_bridge_roundtrip.py` | UE5 simulator for testing |
+| Function | Description |
+|----------|-------------|
+| `SendAnswer(QuestionId, OptionIndex, ResponseTimeMs)` | Submit the player's answer |
+| `SendAcknowledge()` | Tell the backend you're ready for the next question |
+| `IsBridgeConnected()` | Check if the Python backend is running |
+| `GetCurrentQuestion()` | Get the current question data |
 
-### C++ (Unreal Engine Side)
+### Bridge Subsystem
 
-| File | Purpose |
-|------|---------|
-| `BridgeComponent.cpp/h` | Main bridge component with USD parsing |
-| `TranslatorsCard.Build.cs` | Module build configuration |
-| `UI/W_QuestionDisplay.*` | Question display widget |
-| `UI/W_OptionButton.*` | Answer option button |
-| `UI/W_ProgressIndicator.*` | Progress bar widget |
+| Function | Description |
+|----------|-------------|
+| `StartGame()` | Begin the bridge connection and game session |
+| `StopGame()` | End the session and clean up |
+| `SubmitAnswer(Answer)` | Submit a structured answer |
+| `GetBridgeState()` | Current state (Idle, Connected, QuestionActive, etc.) |
+| `GetBehavioralSignals()` | Response timing, hesitation count, detected state |
 
-### USD
+### Question Data (`FTranslatorsQuestion`)
 
-| File | Purpose |
-|------|---------|
-| `~/.translators/bridge_state.usda` | Runtime bridge state (auto-generated) |
-| `USD/cognitive_substrate_template.usda` | Reference template |
-
----
-
-## Checksum Algorithm
-
-Deterministic DJB2 hash ensuring **same answers → same checksum**:
-
-```python
-def compute_checksum(dimensions: dict) -> str:
-    # FIXED: Sort alphabetically for determinism
-    sorted_dims = sorted(dimensions.items())
-
-    # FIXED: Serialize format
-    serialized = "TRL_v1|" + "|".join(f"{k}:{v}" for k, v in sorted_dims)
-
-    # FIXED: DJB2 hash algorithm
-    hash_val = 5381
-    for char in serialized:
-        hash_val = ((hash_val << 5) + hash_val) + ord(char)
-        hash_val &= 0xFFFFFFFF
-
-    return format(hash_val, '08x')
-```
-
-**Test anchor:** Input `{"load": 7, "ground": 5}` → Checksum `40d7a7a4`
+| Property | Type | Description |
+|----------|------|-------------|
+| `QuestionId` | String | Unique identifier |
+| `Text` | String | Question text (supports `\n` for line breaks) |
+| `OptionLabels` | String Array | Answer option display text |
+| `OptionDirections` | String Array | Semantic direction per option |
+| `Index` | Int | Current question number (0-based) |
+| `Total` | Int | Total questions in session |
+| `DepthLabel` | String | Tier: SURFACE, PATTERNS, FEELINGS, or CORE |
 
 ---
 
-## LIVRPS Composition Priority
+## Requirements
 
-USD resolves conflicts via LIVRPS (strongest to weakest):
+- Unreal Engine 5.4+
+- Windows (Win64)
+- Python 3.x (for the backend orchestrator)
 
-| Priority | USD Composition | Cognitive Mapping |
-|----------|-----------------|-------------------|
-| 1 (highest) | **Local** | Session state (mutable) |
-| 2 | **Inherits** | Inherited context |
-| 3 | **VariantSets** | Mode switching |
-| 4 | **References** | Calibration data |
-| 5 | **Payloads** | Domain knowledge |
-| 6 (lowest) | **Specializes** | Base profile (immutable) |
+## License
 
-**Resolution rule:** Higher priority wins. Local session state overrides base profile.
+MIT
 
----
+## Author
 
-## Critical Notes
-
-| Issue | Solution |
-|-------|----------|
-| USD Stage won't auto-reload | Call `SetRootLayer("")` then `SetRootLayer(path)` |
-| FDirectoryWatcher is editor-only | Use polling in packaged builds |
-| File locking on Windows | Retry with 100ms delay (up to 3x) |
-| pxr not installed | Falls back to text-based USDA generation |
-
----
-
-## References
-
-- **ThinkingMachines Research:** https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/
-- **USD Specification:** https://openusd.org/release/spec.html
-- **LIVRPS Composition:** https://openusd.org/release/glossary.html#livrps-strength-ordering
-- **Project CLAUDE.md:** See root `CLAUDE.md` for full cognitive substrate specification
-
----
-
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 2.0.0 | Jan 2026 | USD-native communication, ThinkingMachines compliance, ADHD_MoE routing |
-| 1.0.0 | Jan 2026 | Initial JSON-based bridge |
-
----
-
-**License:** MIT
-
-**Author:** The Translators Project
+[Joseph Ibrahim](https://github.com/JosephOIbrahim)
