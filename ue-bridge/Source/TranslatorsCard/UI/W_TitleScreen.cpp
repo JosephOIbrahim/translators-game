@@ -3,6 +3,7 @@
 // Programmatic UI - no Blueprint required
 
 #include "W_TitleScreen.h"
+#include "TranslatorsBridgeRuntime.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
 #include "Components/VerticalBox.h"
@@ -69,7 +70,7 @@ void UW_TitleScreen::NativeConstruct()
     // Request keyboard focus so we can receive Enter key
     SetKeyboardFocus();
 
-    UE_LOG(LogTemp, Log, TEXT("[W_TitleScreen] Constructed (Programmatic UI)"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_TitleScreen] Constructed (Programmatic UI)"));
 }
 
 
@@ -96,7 +97,7 @@ FReply UW_TitleScreen::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEv
         if (Key == EKeys::Enter || Key == EKeys::SpaceBar)
         {
             bStartRequested = true;
-            UE_LOG(LogTemp, Log, TEXT("[W_TitleScreen] Start requested!"));
+            UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_TitleScreen] Start requested!"));
             OnStartRequested.Broadcast();
             return FReply::Handled();
         }
@@ -162,5 +163,5 @@ void UW_TitleScreen::BuildWidgetTree()
         PromptSlot->SetHorizontalAlignment(HAlign_Center);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_TitleScreen] Built programmatic widget tree (Border root)"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_TitleScreen] Built programmatic widget tree (Border root)"));
 }

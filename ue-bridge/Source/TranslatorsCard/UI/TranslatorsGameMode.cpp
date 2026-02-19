@@ -2,6 +2,7 @@
 // Implementation of game mode
 
 #include "TranslatorsGameMode.h"
+#include "TranslatorsBridgeRuntime.h"
 #include "TranslatorsHUD.h"
 #include "../BridgeComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -21,7 +22,7 @@ ATranslatorsGameMode::ATranslatorsGameMode()
 
     BridgeActor = nullptr;
 
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsGameMode] Constructed with TranslatorsHUD"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsGameMode] Constructed with TranslatorsHUD"));
 }
 
 
@@ -45,7 +46,7 @@ void ATranslatorsGameMode::InitGame(const FString& MapName, const FString& Optio
             Bridge->RegisterComponent();
             BridgeActor->AddInstanceComponent(Bridge);
 
-            UE_LOG(LogTemp, Log, TEXT("[TranslatorsGameMode] Auto-spawned BridgeActor with BridgeComponent"));
+            UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsGameMode] Auto-spawned BridgeActor with BridgeComponent"));
         }
     }
 }

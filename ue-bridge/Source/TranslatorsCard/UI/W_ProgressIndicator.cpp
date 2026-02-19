@@ -3,6 +3,7 @@
 // Programmatic UI - no Blueprint required
 
 #include "W_ProgressIndicator.h"
+#include "TranslatorsBridgeRuntime.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
@@ -65,7 +66,7 @@ void UW_ProgressIndicator::NativeConstruct()
     // Initial state
     RefreshIndicators();
 
-    UE_LOG(LogTemp, Log, TEXT("[W_ProgressIndicator] Constructed with %d slots"), TotalQuestions);
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_ProgressIndicator] Constructed with %d slots"), TotalQuestions);
 }
 
 
@@ -74,7 +75,7 @@ void UW_ProgressIndicator::UpdateProgress(int32 QuestionsCompleted)
     CurrentQuestion = FMath::Clamp(QuestionsCompleted, 0, TotalQuestions);
     RefreshIndicators();
 
-    UE_LOG(LogTemp, Log, TEXT("[W_ProgressIndicator] Progress: %d/%d (%.0f%%)"),
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_ProgressIndicator] Progress: %d/%d (%.0f%%)"),
         CurrentQuestion, TotalQuestions, GetCompletionPercent() * 100.0f);
 }
 
@@ -174,5 +175,5 @@ void UW_ProgressIndicator::BuildWidgetTree()
         ContainerSlot->SetAutoSize(true);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_ProgressIndicator] Built programmatic widget tree"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_ProgressIndicator] Built programmatic widget tree"));
 }

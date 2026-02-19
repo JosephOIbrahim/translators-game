@@ -3,6 +3,7 @@
 // Programmatic UI - no Blueprint required
 
 #include "TranslatorsHUD.h"
+#include "TranslatorsBridgeRuntime.h"
 #include "W_QuestionDisplay.h"
 #include "W_ProgressIndicator.h"
 #include "W_ConnectingScreen.h"
@@ -31,14 +32,14 @@ void ATranslatorsHUD::BeginPlay()
 {
     Super::BeginPlay();
 
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] BeginPlay - Initializing..."));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] BeginPlay - Initializing..."));
 
     // Find BridgeComponent
     BridgeComponent = FindBridgeComponent();
 
     if (BridgeComponent)
     {
-        UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Found BridgeComponent - binding events"));
+        UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Found BridgeComponent - binding events"));
 
         BridgeComponent->OnBridgeReady.AddDynamic(this, &ATranslatorsHUD::OnBridgeReady);
         BridgeComponent->OnQuestionReceived.AddDynamic(this, &ATranslatorsHUD::OnQuestionReceived);
@@ -47,7 +48,7 @@ void ATranslatorsHUD::BeginPlay()
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("[TranslatorsHUD] BridgeComponent not found in level!"));
+        UE_LOG(LogTranslatorsBridge, Warning, TEXT("[TranslatorsHUD] BridgeComponent not found in level!"));
     }
 
     // Create UI widgets
@@ -106,7 +107,7 @@ UBridgeComponent* ATranslatorsHUD::FindBridgeComponent()
     }
 
     // Fallback: spawn a dedicated actor with BridgeComponent
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] No BridgeComponent found - spawning BridgeActor"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] No BridgeComponent found - spawning BridgeActor"));
     UWorld* World = GetWorld();
     if (World)
     {
@@ -132,7 +133,7 @@ void ATranslatorsHUD::CreateWidgets()
     APlayerController* PC = GetOwningPlayerController();
     if (!PC)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[TranslatorsHUD] No PlayerController - cannot create widgets"));
+        UE_LOG(LogTranslatorsBridge, Warning, TEXT("[TranslatorsHUD] No PlayerController - cannot create widgets"));
         return;
     }
 
@@ -149,7 +150,7 @@ void ATranslatorsHUD::CreateWidgets()
     {
         TitleWidget->AddToViewport(40);
         TitleWidget->OnStartRequested.AddDynamic(this, &ATranslatorsHUD::OnTitleStartRequested);
-        UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Created TitleWidget"));
+        UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Created TitleWidget"));
     }
 
     // Create question display widget
@@ -167,7 +168,7 @@ void ATranslatorsHUD::CreateWidgets()
         QuestionWidget->SetVisibility(ESlateVisibility::Hidden);
         QuestionWidget->SetRenderOpacity(0.0f);
         QuestionWidget->OnAnswerSelected.AddDynamic(this, &ATranslatorsHUD::OnAnswerSelected);
-        UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Created QuestionWidget"));
+        UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Created QuestionWidget"));
     }
 
     // Create connecting widget
@@ -183,7 +184,7 @@ void ATranslatorsHUD::CreateWidgets()
     {
         ConnectingWidget->AddToViewport(20);
         ConnectingWidget->SetVisibility(ESlateVisibility::Hidden);
-        UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Created ConnectingWidget"));
+        UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Created ConnectingWidget"));
     }
 
     // Create finale widget
@@ -200,7 +201,7 @@ void ATranslatorsHUD::CreateWidgets()
         FinaleWidget->AddToViewport(30);
         FinaleWidget->SetVisibility(ESlateVisibility::Hidden);
         FinaleWidget->SetRenderOpacity(0.0f);
-        UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Created FinaleWidget"));
+        UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Created FinaleWidget"));
     }
 }
 
@@ -209,7 +210,7 @@ void ATranslatorsHUD::CreateWidgets()
 
 void ATranslatorsHUD::SetHUDState(EHUDState NewState)
 {
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] State transition: %d -> %d"), (uint8)CurrentHUDState, (uint8)NewState);
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] State transition: %d -> %d"), (uint8)CurrentHUDState, (uint8)NewState);
     CurrentHUDState = NewState;
 
     switch (NewState)
@@ -345,7 +346,7 @@ void ATranslatorsHUD::SendAcknowledgment()
     if (BridgeComponent)
     {
         BridgeComponent->SendAcknowledge();
-        UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Sent acknowledgment"));
+        UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Sent acknowledgment"));
     }
 }
 
@@ -354,7 +355,7 @@ void ATranslatorsHUD::SendAcknowledgment()
 
 void ATranslatorsHUD::OnTitleStartRequested()
 {
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Title -> Connecting"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Title -> Connecting"));
     SetHUDState(EHUDState::Connecting);
 
     // If bridge is already connected (orchestrator started before Enter was pressed)
@@ -367,7 +368,7 @@ void ATranslatorsHUD::OnTitleStartRequested()
 
 void ATranslatorsHUD::OnBridgeReady(int32 InTotalQuestions)
 {
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Bridge ready! Total questions: %d"), InTotalQuestions);
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Bridge ready! Total questions: %d"), InTotalQuestions);
 
     bIsBridgeConnected = true;
     TotalQuestions = InTotalQuestions;
@@ -381,7 +382,7 @@ void ATranslatorsHUD::OnBridgeReady(int32 InTotalQuestions)
         FTranslatorsQuestion Q = BridgeComponent->GetCurrentQuestion();
         if (!Q.QuestionId.IsEmpty())
         {
-            UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Catching up - bridge already has question: %s"), *Q.QuestionId);
+            UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Catching up - bridge already has question: %s"), *Q.QuestionId);
             CurrentQuestion = Q;
             QuestionStartTime = GetWorld()->GetTimeSeconds();
             if (QuestionWidget)
@@ -397,7 +398,7 @@ void ATranslatorsHUD::OnBridgeReady(int32 InTotalQuestions)
 
 void ATranslatorsHUD::OnQuestionReceived(const FString& QuestionJson)
 {
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Question received"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Question received"));
 
     if (!BridgeComponent)
     {
@@ -452,7 +453,7 @@ void ATranslatorsHUD::OnQuestionReceived(const FString& QuestionJson)
                 *CurrentQuestion.DepthLabel, *CurrentQuestion.QuestionId));
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Displaying question %d/%d [%s]: %s"),
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Displaying question %d/%d [%s]: %s"),
         CurrentQuestion.Index + 1, CurrentQuestion.Total,
         *CurrentQuestion.DepthLabel, *CurrentQuestion.QuestionId);
 }
@@ -460,7 +461,7 @@ void ATranslatorsHUD::OnQuestionReceived(const FString& QuestionJson)
 
 void ATranslatorsHUD::OnTransitionReceived(const FString& Direction, const FString& NextScene)
 {
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Transition: %s -> %s"), *Direction, *NextScene);
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Transition: %s -> %s"), *Direction, *NextScene);
 
     if (GEngine)
     {
@@ -472,7 +473,7 @@ void ATranslatorsHUD::OnTransitionReceived(const FString& Direction, const FStri
 
 void ATranslatorsHUD::OnFinaleReceived(const FString& UsdPath)
 {
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Finale! USD path: %s"), *UsdPath);
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Finale! USD path: %s"), *UsdPath);
 
     bIsComplete = true;
 
@@ -551,7 +552,7 @@ void ATranslatorsHUD::UpdateTransition(float DeltaSeconds)
             {
                 float ResponseTimeMs = (GetWorld()->GetTimeSeconds() - QuestionStartTime) * 1000.0f;
                 BridgeComponent->SendAnswer(CurrentQuestion.QuestionId, PendingAnswerIndex, ResponseTimeMs);
-                UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Sent deferred answer: option %d (%.0fms)"), PendingAnswerIndex, ResponseTimeMs);
+                UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Sent deferred answer: option %d (%.0fms)"), PendingAnswerIndex, ResponseTimeMs);
                 PendingAnswerIndex = -1;
             }
 
@@ -586,7 +587,7 @@ void ATranslatorsHUD::UpdateTransition(float DeltaSeconds)
         // Safety timeout
         if (TransitionTimer > 10.0f)
         {
-            UE_LOG(LogTemp, Warning, TEXT("[TranslatorsHUD] Transition timeout - returning to visible"));
+            UE_LOG(LogTranslatorsBridge, Warning, TEXT("[TranslatorsHUD] Transition timeout - returning to visible"));
             if (QuestionWidget)
             {
                 QuestionWidget->SetRenderOpacity(1.0f);
@@ -689,7 +690,7 @@ void ATranslatorsHUD::OnAnswerSelected(int32 OptionIndex)
         return;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[TranslatorsHUD] Answer selected: option %d"), OptionIndex);
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[TranslatorsHUD] Answer selected: option %d"), OptionIndex);
 
     PendingAnswerIndex = OptionIndex;
     TransitionState = EHUDTransition::AnswerHold;

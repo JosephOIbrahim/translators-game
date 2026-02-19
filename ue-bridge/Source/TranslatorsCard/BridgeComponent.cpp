@@ -4,6 +4,7 @@
 // so existing Blueprints continue to work without modification.
 
 #include "BridgeComponent.h"
+#include "TranslatorsBridgeRuntime.h"
 #include "TranslatorsBridgeSubsystem.h"
 #include "BridgeTypes.h"
 #include "Engine/GameInstance.h"
@@ -28,7 +29,7 @@ void UBridgeComponent::BeginPlay()
 
     if (!BridgeSubsystem)
     {
-        UE_LOG(LogTemp, Error, TEXT("[BridgeComponent] Could not find UTranslatorsBridgeSubsystem — is the TranslatorsBridge plugin enabled?"));
+        UE_LOG(LogTranslatorsBridge, Error, TEXT("[BridgeComponent] Could not find UTranslatorsBridgeSubsystem — is the TranslatorsBridge plugin enabled?"));
         return;
     }
 

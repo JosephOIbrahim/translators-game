@@ -4,6 +4,7 @@
 
 #include "W_QuestionDisplay.h"
 #include "W_OptionButton.h"
+#include "TranslatorsBridgeRuntime.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/VerticalBox.h"
@@ -61,7 +62,7 @@ void UW_QuestionDisplay::NativeConstruct()
         ProgressText->SetColorAndOpacity(FSlateColor(ProgressTextColor));
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Constructed (Programmatic UI)"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_QuestionDisplay] Constructed (Programmatic UI)"));
 }
 
 
@@ -156,7 +157,7 @@ void UW_QuestionDisplay::BuildWidgetTree()
         OptionsSlot->SetHorizontalAlignment(HAlign_Fill);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Built programmatic widget tree"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_QuestionDisplay] Built programmatic widget tree"));
 }
 
 
@@ -204,7 +205,7 @@ void UW_QuestionDisplay::ShowQuestion(const FTranslatorsQuestion& Question)
     // Create option buttons
     CreateOptionButtons();
 
-    UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Showing question %d/%d: %s"),
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_QuestionDisplay] Showing question %d/%d: %s"),
         Question.Index + 1, Question.Total, *Question.QuestionId);
 }
 
@@ -246,7 +247,7 @@ void UW_QuestionDisplay::CreateOptionButtons()
 
     if (!OptionsContainer)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[W_QuestionDisplay] No OptionsContainer"));
+        UE_LOG(LogTranslatorsBridge, Warning, TEXT("[W_QuestionDisplay] No OptionsContainer"));
         return;
     }
 
@@ -300,6 +301,6 @@ void UW_QuestionDisplay::HandleOptionClicked(int32 OptionIndex)
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_QuestionDisplay] Answer: option %d"), OptionIndex);
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_QuestionDisplay] Answer: option %d"), OptionIndex);
     OnAnswerSelected.Broadcast(OptionIndex);
 }

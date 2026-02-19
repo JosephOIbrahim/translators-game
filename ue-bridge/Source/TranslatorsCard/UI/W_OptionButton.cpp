@@ -3,6 +3,7 @@
 // Programmatic UI - no Blueprint required
 
 #include "W_OptionButton.h"
+#include "TranslatorsBridgeRuntime.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
@@ -54,7 +55,7 @@ void UW_OptionButton::NativeConstruct()
         OptionLabel->SetColorAndOpacity(FSlateColor(TextColor));
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_OptionButton] Constructed (Programmatic UI)"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_OptionButton] Constructed (Programmatic UI)"));
 }
 
 
@@ -84,7 +85,7 @@ void UW_OptionButton::SetupOption(int32 Index, const FText& Label, const FString
         OptionLabel->SetText(LabelText);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_OptionButton] Setup option %d: %s (dir: %s)"),
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_OptionButton] Setup option %d: %s (dir: %s)"),
         Index, *Label.ToString(), *Dir);
 }
 
@@ -110,7 +111,7 @@ void UW_OptionButton::SimulateClick()
 
 void UW_OptionButton::HandleButtonClicked()
 {
-    UE_LOG(LogTemp, Log, TEXT("[W_OptionButton] Option %d clicked"), OptionIndex);
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_OptionButton] Option %d clicked"), OptionIndex);
 
     // Visual feedback
     UpdateVisualState(PressedColor);
@@ -192,5 +193,5 @@ void UW_OptionButton::BuildWidgetTree()
 
     OptionButton->AddChild(OptionLabel);
 
-    UE_LOG(LogTemp, Log, TEXT("[W_OptionButton] Built programmatic widget tree"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_OptionButton] Built programmatic widget tree"));
 }

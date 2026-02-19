@@ -3,6 +3,7 @@
 // Programmatic UI - no Blueprint required
 
 #include "W_FinaleScreen.h"
+#include "TranslatorsBridgeRuntime.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
 #include "Components/CanvasPanel.h"
@@ -75,7 +76,7 @@ void UW_FinaleScreen::NativeConstruct()
         ChecksumText->SetColorAndOpacity(FSlateColor(DimColor));
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_FinaleScreen] Constructed (Programmatic UI with Profile Display)"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_FinaleScreen] Constructed (Programmatic UI with Profile Display)"));
 }
 
 
@@ -103,7 +104,7 @@ void UW_FinaleScreen::DisplayProfile(const FTranslatorsProfile& Profile)
 {
     if (!Profile.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("[W_FinaleScreen] Empty profile - nothing to display"));
+        UE_LOG(LogTranslatorsBridge, Warning, TEXT("[W_FinaleScreen] Empty profile - nothing to display"));
         return;
     }
 
@@ -223,7 +224,7 @@ void UW_FinaleScreen::DisplayProfile(const FTranslatorsProfile& Profile)
         }
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_FinaleScreen] Displayed profile: %d traits, %d insights"),
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_FinaleScreen] Displayed profile: %d traits, %d insights"),
         Profile.Traits.Num(), Profile.Insights.Num());
 }
 
@@ -365,5 +366,5 @@ void UW_FinaleScreen::BuildWidgetTree()
         PathSlot->SetHorizontalAlignment(HAlign_Center);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_FinaleScreen] Built programmatic widget tree with profile display"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_FinaleScreen] Built programmatic widget tree with profile display"));
 }

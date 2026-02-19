@@ -3,6 +3,7 @@
 // Programmatic UI - no Blueprint required
 
 #include "W_ConnectingScreen.h"
+#include "TranslatorsBridgeRuntime.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
 #include "Blueprint/WidgetTree.h"
@@ -42,7 +43,7 @@ void UW_ConnectingScreen::NativeConstruct()
         StatusText->SetColorAndOpacity(FSlateColor(TextColor));
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[W_ConnectingScreen] Constructed (Programmatic UI)"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_ConnectingScreen] Constructed (Programmatic UI)"));
 }
 
 
@@ -72,5 +73,5 @@ void UW_ConnectingScreen::BuildWidgetTree()
     StatusText->SetFont(FSlateFontInfo(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Regular.ttf"), 24));
     BackgroundBorder->AddChild(StatusText);
 
-    UE_LOG(LogTemp, Log, TEXT("[W_ConnectingScreen] Built programmatic widget tree (Border root)"));
+    UE_LOG(LogTranslatorsBridge, Log, TEXT("[W_ConnectingScreen] Built programmatic widget tree (Border root)"));
 }
