@@ -13,6 +13,7 @@
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "Internationalization/Regex.h"
+#include "Engine/Engine.h"
 
 
 // === LIFECYCLE ===
