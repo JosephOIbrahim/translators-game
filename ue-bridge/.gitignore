@@ -4,6 +4,9 @@ Intermediate/
 DerivedDataCache/
 Saved/
 
+# Third-party asset libraries (re-downloadable via Dash/Fab, ~1.1 GB)
+Content/Polygonflow/
+
 # Visual Studio
 .vs/
 .vsconfig
